@@ -1605,6 +1605,8 @@ def get_frac_economics_all_time(db_path: str | None = None) -> dict[str, Any]:
               SUM(realized_pnl > 0)                                          AS wins,
               SUM(realized_pnl < 0)                                          AS losses,
               COALESCE(SUM(realized_pnl), 0)                                 AS total_pnl,
+              COALESCE(SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl END), 0) AS win_pnl,
+              COALESCE(SUM(CASE WHEN realized_pnl < 0 THEN realized_pnl END), 0) AS loss_pnl,
               SUM(status = 'open')                                           AS open_positions,
               COALESCE(SUM(CASE WHEN status = 'open' THEN notional END), 0)  AS notional_open
             FROM frac_positions
@@ -1617,6 +1619,8 @@ def get_frac_economics_all_time(db_path: str | None = None) -> dict[str, Any]:
         "losses": int(r["losses"] or 0),
         "open_positions": int(r["open_positions"] or 0),
         "total_pnl": float(r["total_pnl"] or 0),
+        "win_pnl": float(r["win_pnl"] or 0),
+        "loss_pnl": float(r["loss_pnl"] or 0),
         "win_rate": wins / closed * 100 if closed else None,
         "notional_open": float(r["notional_open"] or 0),
     }

@@ -288,6 +288,7 @@ the review shows no tuning suggestions at all.
 | `GET /reports/eod/frac` | Generate + dispatch today's fractional report |
 | `GET /reports/weekly/frac` | Generate + dispatch the 7-day fractional report |
 | `GET /reports/range?mode=&period=` / `?mode=&start=&end=` | Generate an on-demand range report (`notify=true` to also dispatch) |
+| `GET /reports/economics` | All-time economics summary — `{orders, frac, combined}` (no LLM, no dispatch) |
 | `GET /reports/compare?a=&b=` | Deterministic diff + comparability grade for two same-type reports |
 | `POST /reports/compare/review` | Trading-master LLM review; body `{"a": id, "b": id}` |
 | `GET /reports?limit=&type=` | List persisted reports; `type` filters by `report_type` |

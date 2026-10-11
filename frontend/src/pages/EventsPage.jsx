@@ -14,6 +14,16 @@ const CATEGORY_STYLE = {
 }
 const CATEGORIES = ['scan', 'order', 'discovery', 'notification', 'scheduler', 'system', 'report']
 
+const CATEGORY_LABEL = {
+  scan:         'Scan',
+  order:        'Trade',
+  discovery:    'Discovery',
+  notification: 'Alert',
+  scheduler:    'Scheduler',
+  system:       'System',
+  report:       'Report',
+}
+
 // Level accent — error red, warn amber, info none
 const levelColor = (level) =>
   level === 'error' ? 'var(--red)' : level === 'warn' ? 'var(--yellow)' : null
@@ -95,13 +105,13 @@ export default function EventsPage() {
               onClick={() => setFilter(cat)}
               style={{
                 padding: '3px 11px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', textTransform: 'capitalize',
+                cursor: 'pointer',
                 background: active ? (cs ? cs.bg : 'var(--accent-dim)') : 'transparent',
                 color:      active ? (cs ? cs.color : 'var(--accent)') : 'var(--dim)',
                 border: `1px solid ${active ? (cs ? cs.color : 'var(--accent)') : 'var(--border)'}`,
               }}
             >
-              {cat}
+              {cat === 'all' ? 'All' : (CATEGORY_LABEL[cat] ?? cat)}
             </button>
           )
         })}
@@ -177,7 +187,7 @@ export default function EventsPage() {
                     border: `1px solid ${lc ?? 'transparent'}`,
                   }}
                 >
-                  {ev.category}
+                  {CATEGORY_LABEL[ev.category] ?? ev.category}
                 </span>
 
                 {/* Message — red on error, amber on warn; expandable if meta exists */}

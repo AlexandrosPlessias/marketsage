@@ -159,19 +159,27 @@ function EduSection({ id, title, badge, children, defaultOpen = false }) {
 }
 
 const EDU_SECTIONS = [
-  { id: 'edu-pipeline',      label: 'Pipeline' },
-  { id: 'edu-indicators',    label: 'Indicators' },
-  { id: 'edu-fundamentals',  label: 'Fundamentals' },
-  { id: 'edu-rules',         label: 'Rules' },
-  { id: 'edu-signals',       label: 'How scores work' },
-  { id: 'edu-backtesting',   label: 'Backtesting' },
-  { id: 'edu-paper-trading', label: 'Paper Trading' },
-  { id: 'edu-fractional',    label: 'Fractional' },
-  { id: 'edu-reports',       label: 'Reports' },
-  { id: 'edu-schedule',      label: 'Schedule' },
-  { id: 'edu-discovery',     label: 'Discovery' },
-  { id: 'edu-glossary',      label: 'Glossary' },
-  { id: 'edu-further',       label: 'Further reading' },
+  { group: 'Analysis', items: [
+    { id: 'edu-pipeline',     label: 'Pipeline' },
+    { id: 'edu-indicators',   label: 'Indicators' },
+    { id: 'edu-fundamentals', label: 'Fundamentals' },
+    { id: 'edu-rules',        label: 'Rules' },
+    { id: 'edu-signals',      label: 'How scores work' },
+  ]},
+  { group: 'Trading', items: [
+    { id: 'edu-paper-trading', label: 'Paper Trading' },
+    { id: 'edu-fractional',    label: 'Fractional' },
+    { id: 'edu-backtesting',   label: 'Backtesting' },
+  ]},
+  { group: 'Automation & Reports', items: [
+    { id: 'edu-reports',   label: 'Reports' },
+    { id: 'edu-schedule',  label: 'Schedule' },
+    { id: 'edu-discovery', label: 'Discovery' },
+  ]},
+  { group: 'Reference', items: [
+    { id: 'edu-glossary', label: 'Glossary' },
+    { id: 'edu-further',  label: 'Further reading' },
+  ]},
 ]
 
 export default function EducationPage() {
@@ -187,10 +195,15 @@ export default function EducationPage() {
       {/* ── Sticky TOC sidebar ─────────────────────────────────────────────── */}
       <nav className="edu-toc">
         <div className="edu-toc-title">Contents</div>
-        {EDU_SECTIONS.map(s => (
-          <button key={s.id} className="edu-toc-link" onClick={() => scrollTo(s.id)}>
-            {s.label}
-          </button>
+        {EDU_SECTIONS.map(g => (
+          <div key={g.group} className="edu-toc-group">
+            <div className="edu-toc-group-label">{g.group}</div>
+            {g.items.map(s => (
+              <button key={s.id} className="edu-toc-link" onClick={() => scrollTo(s.id)}>
+                {s.label}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
 
@@ -966,6 +979,24 @@ export default function EducationPage() {
           </tbody>
         </table>
 
+        <h4 className="edu-sub-heading">Ticker Ledger</h4>
+        <p className="section-desc">
+          The <strong>Ticker Ledger</strong> (below the orders table) groups all closed trades by
+          ticker into a balance-sheet view. The summary row shows Ticker, Trades, Invested, Wins,
+          Losses, Total P&amp;L and Last closed. Click any row to expand a per-trade history, oldest
+          first, with one row per event: <strong>📡 Signal scan</strong> (the signal that preceded
+          the order, with its type and confidence), <strong>▲ LONG / ▼ SHORT Placed</strong> (entry
+          price, notional, shares, stop), <strong>✓ Filled</strong> (fill price) and{' '}
+          <strong>⏹ Closed</strong> or <strong>↩ Cashout</strong> (exit price and realised
+          P&amp;L — a manual cashout is shown as the close of the order it exited).
+        </p>
+        <p className="section-desc">
+          The Fractional tab has its own <strong>Fractional — Ticker Ledger</strong> with the same
+          summary columns. Each position shows <strong>▲ Opened</strong> followed by its exit —{' '}
+          ✅ Target, 🛑 Stop, 🌙 EoD or 🔄 Reconciled — or <strong>⏳ Holding</strong> while it is
+          still open.
+        </p>
+
         <h4 className="edu-sub-heading">Settings</h4>
         <table className="edu-macro-table">
           <thead><tr><th>Setting</th><th>Default</th><th>What it controls</th></tr></thead>
@@ -980,6 +1011,11 @@ export default function EducationPage() {
             <tr><td>Alpaca Paper API URL</td><td>https://paper-api.alpaca.markets/v2</td><td>Must include <code>/v2</code> — without it the account endpoint returns empty data</td></tr>
           </tbody>
         </table>
+        <p className="section-desc">
+          <strong>Fees:</strong> Alpaca paper accounts charge $0 commission. The Closed Orders
+          section shows a <code>Fees: $0 ⓘ</code> label for transparency; all P&amp;L figures are
+          already net of fees.
+        </p>
 
         <h4 className="edu-sub-heading">Getting started</h4>
         <ol className="edu-steps">
@@ -989,6 +1025,17 @@ export default function EducationPage() {
           <li>Enable the <strong>Paper trading enabled</strong> toggle and set your position size.</li>
           <li>Wait for the next scheduled scan, trigger one manually, or click <strong>📈 Place Paper Order</strong> on any signal card — orders appear on the <strong>Trading</strong> page.</li>
         </ol>
+
+        <h4 className="edu-sub-heading">Earnings tab</h4>
+        <p className="section-desc">
+          The <strong>Earnings</strong> tab (third tab in the Trading page) brings both trading
+          flows together. <em>Today</em> shows Day P&amp;L tiles for Orders, Frac and Combined, plus
+          account equity. <em>All-time</em> shows a block per flow and a Combined block: Realised
+          P&amp;L, Closed trades, Win rate (with W/L counts), Gross wins, Gross losses, and open
+          positions with notional at risk. Each block has a <strong>Show charts</strong> toggle
+          that reveals a Win/Loss pie and a P&amp;L breakdown bar (avg win, avg loss, gross win,
+          gross loss, net).
+        </p>
 
         <div className="edu-callout">
           <strong>Free tier is sufficient.</strong> Alpaca's free paper-trading account gives
@@ -1071,6 +1118,11 @@ export default function EducationPage() {
             <tr><td>Weekly Fractional</td><td>7 days</td><td>Fractional trades + cross-week patterns</td></tr>
           </tbody>
         </table>
+        <p className="section-desc">
+          All-time economics across both flows are not a fifth report — they live on the{' '}
+          <strong>Earnings</strong> tab of the Trading page, backed by{' '}
+          <code>GET /reports/economics</code>.
+        </p>
 
         <h4 className="edu-sub-heading">Compute, then narrate</h4>
         <p className="section-desc">
@@ -1100,6 +1152,14 @@ export default function EducationPage() {
           is 10 points — on the reasoning that 62% → 80% is new information while 62% → 65% is not.
         </p>
 
+        <h4 className="edu-sub-heading">Period and all-time P&amp;L in every report</h4>
+        <p className="section-desc">
+          Every EoD and weekly report notification carries a one-line P&amp;L summary —{' '}
+          <em>Period P&amp;L · All-time · Win rate · closed trades</em> — for that trading flow.
+          The period figure comes first (today for EoD, the last 7 days for weekly), so you can
+          judge the window and the running total without opening the app.
+        </p>
+
         <h4 className="edu-sub-heading">Reading the tags</h4>
         <p className="section-desc">
           Every notification starts with its mode and category, so the first thing you read tells
@@ -1121,9 +1181,14 @@ export default function EducationPage() {
       {/* Section 11 — The trading day */}
       <EduSection id="edu-schedule" title="The trading day" badge="Schedule">
         <p className="section-desc">
-          The <strong>Schedule</strong> tab draws the whole week as a timeline — when the machine
-          wakes, when scans fire, when reports go out — so you can see the rhythm without reading
-          cron expressions.
+          The <strong>Schedule</strong> tab draws the trading week as a timetable: a single time
+          column on the left and one column per weekday, so every time slot is one row across
+          Monday to Friday. It shows system wake, the watchlist purge (Monday only), market open,
+          every signal scan, every discovery run, market close, the EoD report, the End-of-Week
+          report (Friday only) and system stop. When a scan and a discovery run fall in the same
+          minute, they share one cell. The scan cadence and discovery interval are read live from
+          Settings, so changing them redraws the table. A red line marks the current time; hover
+          a time to see its UTC equivalent.
         </p>
 
         <h4 className="edu-sub-heading">Two schedulers, not one</h4>

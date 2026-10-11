@@ -442,6 +442,10 @@ def _combined_metrics(
     }
 
 
+_LLM_REPORT_RETRY_DELAY = 60   # seconds to wait before the one automatic retry
+_LLM_REPORT_MAX_ATTEMPTS = 2   # initial attempt + 1 retry
+
+
 def _llm_report(
     prompt_file: str,
     context: dict[str, Any],
@@ -455,9 +459,15 @@ def _llm_report(
     *model_setting_key* names the ``provider:model`` override setting; it
     defaults to ``llm_model_{report_type}``.
 
+    On transient failure the call is retried once after ``_LLM_REPORT_RETRY_DELAY``
+    seconds so a brief provider outage at cron-trigger time doesn't silently produce
+    a digest-only report.
+
     Returns ``(data, model, provider, prompt_tokens, completion_tokens)``.
     All values are None/0 on failure.
     """
+    import time
+
     from backend.analysis import LLMError, call_llm
 
     key = model_setting_key or (f"llm_model_{report_type}" if report_type else "")
@@ -473,34 +483,54 @@ def _llm_report(
     tokens["CONTEXT_JSON"] = json.dumps(context, default=str)
     tokens["TUNING_CONFIG"] = _render_tuning(tuning)
     prompt = _render_prompt(prompt_file, tokens)
-    try:
-        raw, model, pt, ct = call_llm(
-            prompt,
-            system_prompt="You are a precise trading analyst. Return only compact JSON.",
-            model=model_override,
-            use_fallback=True,
-            _primary_provider_override=provider_override,
-        )
-        # Strip markdown code fences that some providers (e.g. Gemini) add around JSON.
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw, count=1)
-            raw = re.sub(r"\s*```\s*$", "", raw)
+
+    last_exc: Exception | None = None
+    for attempt in range(1, _LLM_REPORT_MAX_ATTEMPTS + 1):
+        try:
+            raw, model, pt, ct = call_llm(
+                prompt,
+                system_prompt="You are a precise trading analyst. Return only compact JSON.",
+                model=model_override,
+                use_fallback=True,
+                _primary_provider_override=provider_override,
+            )
+            # Strip markdown code fences that some providers (e.g. Gemini) add around JSON.
             raw = raw.strip()
-        data = json.loads(raw)
-    except (LLMError, ValueError, TypeError, OSError) as exc:
-        _log.warning("LLM report generation failed: %s", exc)
+            if raw.startswith("```"):
+                raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw, count=1)
+                raw = re.sub(r"\s*```\s*$", "", raw)
+                raw = raw.strip()
+            data = json.loads(raw)
+            break  # success
+        except (LLMError, ValueError, TypeError, OSError) as exc:
+            last_exc = exc
+            if attempt < _LLM_REPORT_MAX_ATTEMPTS:
+                _log.warning(
+                    "LLM report attempt %d/%d failed (%s) — retrying in %ds",
+                    attempt, _LLM_REPORT_MAX_ATTEMPTS, exc, _LLM_REPORT_RETRY_DELAY,
+                )
+                save_event(
+                    "report",
+                    f"LLM attempt {attempt}/{_LLM_REPORT_MAX_ATTEMPTS} failed — retrying in {_LLM_REPORT_RETRY_DELAY}s",
+                    level="warn",
+                    meta={"error": str(exc), "attempt": attempt},
+                )
+                time.sleep(_LLM_REPORT_RETRY_DELAY)
+    else:
+        # All attempts exhausted
+        _log.warning("LLM report generation failed after %d attempts: %s", _LLM_REPORT_MAX_ATTEMPTS, last_exc)
         provider_label = f"{effective_provider}" + (
             f" ({model_override})" if model_override else ""
         )
         save_event(
             "report",
-            f"LLM call failed [{provider_label}]: {exc}",
+            f"LLM call failed [{provider_label}] after {_LLM_REPORT_MAX_ATTEMPTS} attempts: {last_exc}",
             level="error",
             meta={
-                "error": str(exc),
+                "error": str(last_exc),
                 "provider": effective_provider,
                 "model_override": model_override,
+                "attempts": _LLM_REPORT_MAX_ATTEMPTS,
             },
         )
         return None, None, None, 0, 0
@@ -1666,6 +1696,8 @@ def reports_economics() -> dict[str, Any]:
             "wins": combined_wins,
             "losses": (ord_eco.get("losses") or 0) + (frac_eco.get("losses") or 0),
             "total_pnl": round(combined_pnl, 2),
+            "win_pnl": round((ord_eco.get("win_pnl") or 0) + (frac_eco.get("win_pnl") or 0), 2),
+            "loss_pnl": round((ord_eco.get("loss_pnl") or 0) + (frac_eco.get("loss_pnl") or 0), 2),
             "win_rate": combined_wins / combined_closed * 100 if combined_closed else None,
         },
     }

@@ -89,11 +89,11 @@ export default function App() {
   }
 
   // Auth gate — must come after all hooks so hook call order is stable.
-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />
+  if (!authed) return <LoginScreen onLogin={() => { setAuthed(true); window.dispatchEvent(new Event('auth-login')) }} />
 
   return (
     <div className="app">
-      <Header health={health} usage={usage} btTodayTokens={btTodayTokens} activeView={activeView} onViewChange={setActiveView} clock={paperClock} />
+      <Header health={health} usage={usage} btTodayTokens={btTodayTokens} activeView={activeView} onViewChange={setActiveView} onOpenSettings={openSettings} clock={paperClock} />
       <main className="main">
         {/* All three views are always mounted — switching tabs never destroys SSE state */}
         <div style={{ display: activeView === 'dashboard' ? 'flex' : 'none',

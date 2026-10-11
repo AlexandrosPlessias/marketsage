@@ -2896,6 +2896,27 @@ details.edu-section[open] .edu-chevron {
   background: var(--accent-dim);
 }
 
+.edu-toc-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.edu-toc-group + .edu-toc-group {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.edu-toc-group-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  opacity: 0.6;
+  padding: 4px 14px 2px;
+  font-family: var(--font-ui);
+}
+
 /* ── Settings layout — 2-col with sticky TOC (mirrors .education-layout) ────── */
 .settings-layout {
   display: grid;
@@ -3059,6 +3080,36 @@ details.edu-section[open] .edu-chevron {
   user-select: none;
   margin: 0 2px;
 }
+
+/* Status bar groups: Market · Engine · AI (AI pushed right) */
+.statusbar-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.statusbar-group-end { margin-left: auto; }
+
+/* Quiet by default; colour only for warn / err */
+.status-chip {
+  max-width: none;
+  background: var(--surface);
+  color: var(--text-dim);
+  border-color: var(--border);
+  font-weight: 500;
+}
+button.status-chip { cursor: pointer; }
+button.status-chip:hover { color: var(--text); border-color: var(--accent-glow); }
+button.status-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status-chip-detail { font-weight: 400; opacity: 0.75; }
+
+.status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
+.status-chip-ok   .status-dot { background: var(--green); }
+.status-chip-idle .status-dot { background: var(--dim); opacity: 0.6; }
+.status-chip-warn { color: var(--yellow); border-color: rgba(251,191,36,0.40); background: rgba(251,191,36,0.10); }
+.status-chip-warn .status-dot { background: var(--yellow); }
+.status-chip-err  { color: var(--red); border-color: rgba(248,113,113,0.40); background: rgba(248,113,113,0.10); }
+.status-chip-err  .status-dot { background: var(--red); }
 
 /* ── Token Usage settings section ──────────────────────────────────────────── */
 .usage-summary-row {

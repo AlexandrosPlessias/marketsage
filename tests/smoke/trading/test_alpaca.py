@@ -112,7 +112,7 @@ def test_alpaca_bracket_order(check):
             side_effect=lambda k, d="": {
                 "paper_trading_enabled": "true",
                 "paper_trade_position_size": "500",
-                "paper_trade_min_confidence": "",
+                "paper_trade_min_confidence": "0",
                 "paper_max_positions": "5",
             }.get(k, d),
         ):

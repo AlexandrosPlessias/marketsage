@@ -21,9 +21,11 @@ export function usePolling(path, intervalMs = 0) {
 
   useEffect(() => {
     load()
-    if (!intervalMs) return
-    const id = setInterval(load, intervalMs)
-    return () => clearInterval(id)
+    // Polls start before the login screen is submitted; refetch as soon as a token
+    // exists instead of waiting a full interval (60 s for /usage and /watchlist).
+    window.addEventListener('auth-login', load)
+    const id = intervalMs ? setInterval(load, intervalMs) : null
+    return () => { window.removeEventListener('auth-login', load); if (id) clearInterval(id) }
   }, [load, intervalMs])
 
   return { data, error, reload: load }

@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react'
 import PaperTradingPage from './PaperTradingPage'
 import FracTradingPage from './FracTradingPage'
 import { API, getAuthHeaders } from '../utils/api'
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
+  PieChart, Pie, Legend,
+} from 'recharts'
 
 const money = (v, dp = 2) =>
   v == null ? '—' : `${v >= 0 ? '' : '-'}$${Math.abs(Number(v)).toFixed(dp)}`
@@ -21,6 +25,71 @@ function Tile({ label, value, color, sub }) {
   )
 }
 
+function ChartSection({ eco }) {
+  const [open, setOpen] = useState(false)
+  if (!eco) return null
+  const hasTrades = (eco.closed_trades ?? 0) > 0
+
+  const winLossData = [
+    { name: 'Wins', value: eco.wins ?? 0, fill: '#34d399' },
+    { name: 'Losses', value: eco.losses ?? 0, fill: '#f87171' },
+  ]
+  const avgWin = eco.wins > 0 && eco.win_pnl != null ? eco.win_pnl / eco.wins : null
+  const avgLoss = eco.losses > 0 && eco.loss_pnl != null ? eco.loss_pnl / eco.losses : null
+  const pnlData = [
+    ...(avgWin != null ? [{ name: 'Avg win', value: +avgWin.toFixed(2), fill: '#34d399' }] : []),
+    ...(avgLoss != null ? [{ name: 'Avg loss', value: +Math.abs(avgLoss).toFixed(2), fill: '#f87171' }] : []),
+    { name: 'Gross win', value: +(eco.win_pnl ?? 0).toFixed(2), fill: '#059669' },
+    { name: 'Gross loss', value: +Math.abs(eco.loss_pnl ?? 0).toFixed(2), fill: '#dc2626' },
+    { name: 'Net', value: +Math.abs(eco.total_pnl ?? 0).toFixed(2), fill: (eco.total_pnl ?? 0) >= 0 ? '#34d399' : '#f87171' },
+  ]
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          fontSize: 11, color: 'var(--dim)', background: 'none', border: 'none',
+          cursor: 'pointer', padding: '2px 0', userSelect: 'none',
+        }}
+      >
+        {open ? '▾ Hide charts' : '▸ Show charts'}
+      </button>
+      {open && !hasTrades && (
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8 }}>No closed trades yet — nothing to chart.</div>
+      )}
+      {open && hasTrades && (
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
+          <div style={{ flex: '1 1 200px', minWidth: 180 }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Win / Loss</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <PieChart>
+                <Pie data={winLossData} dataKey="value" cx="50%" cy="50%" outerRadius={60} label={({ name, value }) => `${name} ${value}`} labelLine={false} fontSize={11}>
+                  {winLossData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Pie>
+                <Tooltip formatter={v => [`${v} trades`]} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{ flex: '1 1 260px', minWidth: 220 }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>P&L breakdown ($)</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={pnlData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--dim)' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--dim)' }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                <Tooltip formatter={v => [`$${v}`]} />
+                <Bar dataKey="value" radius={[3, 3, 0, 0]}>
+                  {pnlData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EcoBlock({ title, eco, color }) {
   if (!eco) return null
   const wr = eco.win_rate != null ? `${eco.win_rate.toFixed(0)}%` : '—'
@@ -31,12 +100,13 @@ function EcoBlock({ title, eco, color }) {
         <Tile label="Realised P&L" value={money(eco.total_pnl)} color={pnlColor(eco.total_pnl)} />
         <Tile label="Closed trades" value={eco.closed_trades ?? 0} />
         <Tile label="Win rate" value={wr} sub={`${eco.wins ?? 0}W / ${eco.losses ?? 0}L`} />
-        <Tile label="Best run" value={money(eco.win_pnl)} color="#34d399" />
-        <Tile label="Worst run" value={money(eco.loss_pnl)} color="#f87171" />
+        <Tile label="Gross wins" value={money(eco.win_pnl)} color="#34d399" />
+        <Tile label="Gross losses" value={money(eco.loss_pnl)} color="#f87171" />
         {eco.open_positions > 0 && (
           <Tile label="Open positions" value={eco.open_positions} sub={`~${money(eco.notional_open, 0)} at risk`} />
         )}
       </div>
+      <ChartSection eco={eco} />
     </div>
   )
 }
@@ -125,6 +195,7 @@ function EarningsTab() {
               sub={`${eco.combined.wins ?? 0}W / ${eco.combined.losses ?? 0}L`}
             />
           </div>
+          <ChartSection eco={eco.combined} />
         </div>
       )}
 
@@ -152,13 +223,13 @@ export default function TradingPage({ initialExpandedOrder, onExpandedOrderConsu
   })
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px 0' }}>
+    <div style={{ maxWidth: 1360, margin: '0 auto', padding: '16px 20px 0' }}>
       <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--border)', paddingBottom: 0, marginBottom: 20 }}>
         <button className={`nav-tab ${tab === 'order' ? 'active' : ''}`} onClick={() => setTab('order')} style={tabStyle(tab === 'order')}>
-          📈 Order Trading
+          📈 Paper Orders
         </button>
         <button className={`nav-tab ${tab === 'frac' ? 'active' : ''}`} onClick={() => setTab('frac')} style={tabStyle(tab === 'frac')}>
-          🪙 Fractional Trading
+          🪙 Fractional
         </button>
         <button className={`nav-tab ${tab === 'earnings' ? 'active' : ''}`} onClick={() => setTab('earnings')} style={tabStyle(tab === 'earnings')}>
           💰 Earnings

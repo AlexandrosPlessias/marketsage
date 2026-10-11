@@ -111,7 +111,9 @@ def _cache_get(key: str, ttl_minutes: int | None = None) -> Any | None:
             cached_at_str = envelope.get("_cached_at", "")
             if cached_at_str:
                 cached_at = datetime.fromisoformat(cached_at_str)
-                age_minutes = (datetime.utcnow() - cached_at).total_seconds() / 60
+                if cached_at.tzinfo is None:
+                    cached_at = cached_at.replace(tzinfo=timezone.utc)
+                age_minutes = (datetime.now(timezone.utc) - cached_at).total_seconds() / 60
                 if age_minutes > ttl_minutes:
                     _log.debug(
                         "cache stale (%.0f min > %d min) key=%s",
@@ -134,7 +136,7 @@ def _cache_set(key: str, data: Any) -> None:
     try:
         from .database import set_cached_data
 
-        envelope = {"_cached_at": datetime.utcnow().isoformat(), "_data": data}
+        envelope = {"_cached_at": datetime.now(timezone.utc).isoformat(), "_data": data}
         set_cached_data(key, json.dumps(envelope, default=str))
         _log.debug("cache set key=%s", key)
     except Exception as exc:

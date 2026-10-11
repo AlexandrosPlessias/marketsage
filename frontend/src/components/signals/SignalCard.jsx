@@ -141,6 +141,9 @@ export default function SignalCard({ r, expanded, onToggle, onDelete, existingOr
       {/* header row */}
       <div className="signal-card-header" onClick={onToggle} style={{ cursor: 'pointer' }}>
         <div className="signal-card-left">
+          <span className="signal-card-chevron" style={{ fontSize: 10, color: 'var(--text-dim)', marginRight: 4, userSelect: 'none' }}>
+            {expanded ? '▾' : '▸'}
+          </span>
           <TickerLink className="signal-ticker" ticker={r.ticker} onOpenExplorer={onOpenExplorer} />
           <span className={`badge ${r.type}`} style={{ marginLeft: 8 }}>
             {r.type?.toUpperCase() ?? '—'}
@@ -163,6 +166,11 @@ export default function SignalCard({ r, expanded, onToggle, onDelete, existingOr
               />
             </div>
           </div>
+          {entry != null && (
+            <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+              @ {fmtN(entry)}
+            </span>
+          )}
           <button
             className="btn-delete"
             onClick={e => { e.stopPropagation(); onDelete() }}
@@ -170,6 +178,9 @@ export default function SignalCard({ r, expanded, onToggle, onDelete, existingOr
           >×</button>
         </div>
       </div>
+
+      {/* expanded body — all detail below the header */}
+      {expanded && <>
 
       {/* price grid — color-coded with semantic tooltips */}
       <div className="signal-levels-grid">
@@ -254,8 +265,8 @@ export default function SignalCard({ r, expanded, onToggle, onDelete, existingOr
         </span>
       </div>
 
-      {/* expanded: LLM reasoning */}
-      {expanded && r.llm_analysis && (
+      {/* LLM reasoning */}
+      {r.llm_analysis && (
         <div className="signal-reasoning">
           <div className="signal-reasoning-label">AI Reasoning</div>
           <div className="signal-reasoning-body">{r.llm_analysis}</div>
@@ -310,7 +321,7 @@ export default function SignalCard({ r, expanded, onToggle, onDelete, existingOr
                 disabled={fracState === 'placing' || !isLong}
                 title={isLong
                   ? "Place a fractional buy — cashes out on this signal's stop/target"
-                  : 'Fractional is long-only — Alpaca can’t short fractional shares'}
+                  : 'Fractional is long-only — Alpaca can\'t short fractional shares'}
                 style={{
                   fontSize: 11, padding: '3px 12px', borderRadius: 5,
                   cursor: !isLong ? 'not-allowed' : fracState === 'placing' ? 'wait' : 'pointer',
@@ -330,6 +341,8 @@ export default function SignalCard({ r, expanded, onToggle, onDelete, existingOr
           </>
         </div>
       )}
+
+      </>}
 
     </div>
   )

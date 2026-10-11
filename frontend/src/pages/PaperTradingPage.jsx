@@ -32,7 +32,16 @@ export default function PaperTradingPage({ initialExpandedOrder = null, onExpand
   const [closeNote,      setCloseNote]      = useState({})   // ticker → info note (e.g. GTC queued)
   const [expandedLedger, setExpandedLedger] = useState(false)
   const [expandedLedgerTicker, setExpandedLedgerTicker] = useState(null)
+  const [tickerSignals, setTickerSignals] = useState({})
   const initialConsumed = useRef(false)
+
+  useEffect(() => {
+    if (!expandedLedgerTicker || tickerSignals[expandedLedgerTicker]) return
+    fetch(`${API}/signals?ticker=${encodeURIComponent(expandedLedgerTicker)}&limit=100`, { headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d?.signals && setTickerSignals(prev => ({ ...prev, [expandedLedgerTicker]: d.signals })))
+      .catch(() => {})
+  }, [expandedLedgerTicker])
 
   // When navigated from sidebar, auto-expand and scroll to the target order
   useEffect(() => {
@@ -177,7 +186,7 @@ export default function PaperTradingPage({ initialExpandedOrder = null, onExpand
     .sort((a, b) => new Date(b.filled_at || b.closed_at || b.created_at) - new Date(a.filled_at || a.closed_at || a.created_at))
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ maxWidth: 1360, margin: '0 auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1502,11 +1511,16 @@ export default function PaperTradingPage({ initialExpandedOrder = null, onExpand
 
       {/* ── Ticker Ledger ── balance-sheet view grouped by ticker ── */}
       {closedOrders.length > 0 && (() => {
+        // A cashout (notional == null) closes an earlier opposite-side bracket order — pair them
+        // so the ledger shows one trade (open → cashout), same lookup as the Closed Orders table.
+        const findEntry = o => orders.find(e => e.ticker === o.ticker && e.side !== o.side
+          && e.stop_price != null && e.take_profit_price != null && e.notional != null
+          && new Date(e.created_at) <= new Date(o.created_at))
         const byTicker = closedOrders.reduce((acc, o) => {
           const t = o.ticker
           if (!acc[t]) acc[t] = { ticker: t, trades: [], totalNotional: 0, totalPnl: 0, wins: 0, losses: 0, lastClosed: null }
           acc[t].trades.push(o)
-          acc[t].totalNotional += parseFloat(o.notional ?? 0)
+          acc[t].totalNotional += parseFloat((o.notional == null ? findEntry(o)?.notional : o.notional) ?? 0)
           acc[t].totalPnl      += parseFloat(o.realized_pnl ?? 0)
           if ((o.realized_pnl ?? 0) > 0) acc[t].wins++
           else acc[t].losses++
@@ -1577,14 +1591,20 @@ export default function PaperTradingPage({ initialExpandedOrder = null, onExpand
                                         .slice()
                                         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
                                         .flatMap((o, tradeIdx) => {
-                                          const direction = o.side === 'buy' ? 1 : -1
-                                          const qty = o.qty != null ? parseFloat(o.qty) : (o.entry_price ? Math.floor((o.notional ?? 500) / o.entry_price) : null)
-                                          const exitPrice = o.exit_price ?? (o.realized_pnl != null && qty ? o.filled_avg_price + o.realized_pnl / (qty * direction) : null)
-                                          const closedAt = o.closed_at || o.filled_at
+                                          const isCashout = o.notional == null
+                                          const entry = isCashout ? findEntry(o) : null
+                                          const op = entry ?? o   // the order that opened the position
+                                          const showOpen = !isCashout || entry != null
+                                          const direction = op.side === 'buy' ? 1 : -1
+                                          const qty = op.qty != null ? parseFloat(op.qty) : (op.entry_price ? Math.floor((op.notional ?? 500) / op.entry_price) : null)
+                                          const exitPrice = isCashout
+                                            ? o.filled_avg_price
+                                            : (o.exit_price ?? (o.realized_pnl != null && qty ? o.filled_avg_price + o.realized_pnl / (qty * direction) : null))
+                                          const closedAt = isCashout ? o.filled_at : (o.closed_at || o.filled_at)
                                           const pnl = o.realized_pnl != null ? parseFloat(o.realized_pnl) : null
                                           const pColor = pnl > 0 ? '#34d399' : pnl < 0 ? '#f87171' : 'var(--dim)'
-                                          const dirColor = o.side === 'buy' ? '#34d399' : '#f87171'
-                                          const dirLabel = o.side === 'buy' ? '▲ LONG' : '▼ SHORT'
+                                          const dirColor = op.side === 'buy' ? '#34d399' : '#f87171'
+                                          const dirLabel = op.side === 'buy' ? '▲ LONG' : '▼ SHORT'
                                           const sep = '1px solid color-mix(in srgb, var(--border) 25%, transparent)'
                                           const tdBase = { padding: '3px 10px 3px 0', borderBottom: sep }
                                           const rows = []
@@ -1595,31 +1615,52 @@ export default function PaperTradingPage({ initialExpandedOrder = null, onExpand
                                               </tr>
                                             )
                                           }
+                                          // ── Signal that preceded this order ──────
+                                          const sigs = tickerSignals[row.ticker] ?? []
+                                          const wantType = op.side === 'buy' ? 'long' : 'short'
+                                          const triggerSig = sigs
+                                            .filter(s => s.created_at && new Date(s.created_at) <= new Date(op.created_at))
+                                            .filter(s => String(s.type).toLowerCase() === wantType)
+                                            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+                                          if (showOpen && triggerSig) {
+                                            rows.push(
+                                              <tr key={`sig-${o.id}`}>
+                                                <td style={{ ...tdBase, color: '#a78bfa', fontWeight: 600 }}>📡 Signal scan</td>
+                                                <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(triggerSig.created_at)}</td>
+                                                <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right', color: 'var(--dim)', fontSize: 10 }}>
+                                                  {triggerSig.type ?? ''}
+                                                </td>
+                                                <td colSpan={2} style={{ ...tdBase, padding: '3px 0 3px 10px', color: 'var(--dim)', fontSize: 10 }}>
+                                                  {triggerSig.confidence != null ? `conf ${Number(triggerSig.confidence).toFixed(0)}%` : ''}
+                                                </td>
+                                              </tr>
+                                            )
+                                          }
                                           // ── Placed ───────────────────────────────
-                                          rows.push(
+                                          if (showOpen) rows.push(
                                             <tr key={`placed-${o.id}`}>
                                               <td style={{ ...tdBase, color: dirColor, fontWeight: 700 }}>{dirLabel} Placed</td>
-                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(o.created_at)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(op.created_at)}</td>
                                               <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right' }}>
-                                                {o.entry_price != null ? `$${parseFloat(o.entry_price).toFixed(2)}` : '—'}
+                                                {op.entry_price != null ? `$${parseFloat(op.entry_price).toFixed(2)}` : '—'}
                                               </td>
                                               <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right' }}>
-                                                {o.notional != null ? `$${parseFloat(o.notional).toFixed(0)}` : '—'}
+                                                {op.notional != null ? `$${parseFloat(op.notional).toFixed(0)}` : '—'}
                                                 {qty ? <span style={{ color: 'var(--dim)' }}> · {qty} sh</span> : null}
                                               </td>
                                               <td style={{ ...tdBase, padding: '3px 0 3px 10px', textAlign: 'right', color: 'var(--dim)', fontSize: 10 }}>
-                                                {o.stop_price != null ? `stop $${parseFloat(o.stop_price).toFixed(2)}` : ''}
+                                                {op.stop_price != null ? `stop $${parseFloat(op.stop_price).toFixed(2)}` : ''}
                                               </td>
                                             </tr>
                                           )
                                           // ── Filled ───────────────────────────────
-                                          if (o.filled_avg_price != null) {
+                                          if (showOpen && op.filled_avg_price != null) {
                                             rows.push(
                                               <tr key={`filled-${o.id}`}>
                                                 <td style={{ ...tdBase, color: 'var(--dim)' }}>✓ Filled</td>
-                                                <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(o.filled_at)}</td>
+                                                <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(op.filled_at)}</td>
                                                 <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right', fontWeight: 600 }}>
-                                                  ${parseFloat(o.filled_avg_price).toFixed(2)}
+                                                  ${parseFloat(op.filled_avg_price).toFixed(2)}
                                                 </td>
                                                 <td style={{ ...tdBase, padding: '3px 10px' }} />
                                                 <td style={{ ...tdBase, padding: '3px 0 3px 10px' }} />
@@ -1629,7 +1670,7 @@ export default function PaperTradingPage({ initialExpandedOrder = null, onExpand
                                           // ── Closed ───────────────────────────────
                                           rows.push(
                                             <tr key={`closed-${o.id}`}>
-                                              <td style={{ ...tdBase, color: pnl > 0 ? '#34d399' : pnl < 0 ? '#f87171' : 'var(--dim)' }}>⏹ Closed</td>
+                                              <td style={{ ...tdBase, color: pnl > 0 ? '#34d399' : pnl < 0 ? '#f87171' : 'var(--dim)' }}>{isCashout ? '↩ Cashout' : '⏹ Closed'}</td>
                                               <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(closedAt)}</td>
                                               <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right', fontWeight: 600 }}>
                                                 {exitPrice != null ? `$${parseFloat(exitPrice).toFixed(2)}` : '—'}

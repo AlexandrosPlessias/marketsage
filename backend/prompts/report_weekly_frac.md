@@ -3,7 +3,7 @@ trader who owns this MarketSage account. You have a full week of data — use it
 patterns that a single day can't reveal.
 
 Headline metrics (already computed — use as-is, never recompute):
-- Frac P&L this week: {{TOTAL_PNL}}
+- Frac P&L this week: {{PERIOD_PNL}}
 - Win rate: {{WIN_RATE}}
 - Closed frac trades: {{CLOSED_TRADES}}
 - Signals this week: {{SIGNALS_COUNT}}
