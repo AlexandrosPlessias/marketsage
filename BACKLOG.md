@@ -610,6 +610,46 @@ Usage (same pattern as `backtest_review`). The review is on-demand — never fir
 
 ---
 
+## ✅ 10. Flow hardening, gap fixes, and observability improvements
+*Shipped on branch `dev` (commit `905d19b`)*
+
+**Root-cause investigation:**
+- Connected to Fly.io prod DB via SSH; found `frac_alpaca_secret_key` empty → frac engine silently
+  failing on every run. Fixed by POSTing the key from `.env` to `/frac/settings`.
+- Diagnosed that 100% of recent signals are SHORT (RSI overbought on 3 TFs) — `frac` and `paper`
+  skills are long-only / require shortability, so nothing executes. Watchlist needs oversold tickers.
+- Confirmed primary Alpaca DB credentials empty → tradability gate falls back to permissive mode,
+  discovery auto-add silently skips all candidates.
+
+**New features:**
+- **Per-direction confidence floors** — `long_confidence_floor` and `short_confidence_floor` DB
+  settings (env: `LONG_CONFIDENCE_FLOOR` / `SHORT_CONFIDENCE_FLOOR`). When set > 0, override the
+  general `CONFIDENCE_FLOOR` per signal direction (e.g. demand higher confidence for shorts).
+- **Configurable P/E thresholds** — `PE_OVERBOUGHT` / `PE_OVERSOLD` env vars (Thresholds config,
+  default 60/8) replace hardcoded values in `_check_valuation`.
+- **Configurable trading days** — `TRADING_DAYS` env var (default `"0,1,2,3,4"`) replaces the
+  hardcoded `MarketHours.trading_days` tuple.
+- **Frac connection status in every report** — EOD and weekly notifications now append a
+  `🔗 Frac connection: OK` or `🔴 Frac connection FAILED` line so silent credential failures are
+  caught at report time.
+- **Startup credential check** — missing primary or frac Alpaca credentials emit a warning event
+  in the activity feed immediately on startup rather than failing silently at first scan.
+- **Immediate scan on startup** — when the market is already open at scheduler start, a scan fires
+  immediately before waiting for the next grid slot (eliminates up-to-15-minute blind spot).
+- **Configurable EOD close window** — `eod_close_window_minutes` DB setting (default 15, was
+  hardcoded 10) gives the exit poller more time to act near the close.
+- **deploy.sh macOS auth path** — Vercel CLI stores auth at `~/Library/Application Support/…` on
+  macOS; deploy script now selects the correct path per OS.
+
+**Bug fixes (from audit):**
+- AL4: primary Alpaca client cache keyed on `key_id@url` — now invalidates on URL change (paper→live).
+- D2: tradability drop counting uses meta JSON `reason` field instead of brittle `LIKE 'Dropped %'`.
+- D3: `order_blocked` events with `reason="failed"` (AlpacaError rejections) now counted as
+  `failed_hits` in `get_blocked_event_counts` — visible to the LLM analyst.
+- D4: deprecated `datetime.utcnow()` replaced with `datetime.now(timezone.utc)`.
+- O3: short-signal ATR bracket target clamped to `None` when negative (prevents Alpaca rejection on
+  cheap/volatile stocks).
+
 ## Other ideas
 
 - **Multi-model support** — allow swapping models per ticker or per scan type; benchmark `qwen2.5:14b` vs `llama3.1:8b` vs `mistral:7b` on accuracy/latency

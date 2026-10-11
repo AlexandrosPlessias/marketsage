@@ -123,6 +123,12 @@ class AutoTradeSettingRequest(BaseModel):
     frac_position_size: float | None = Field(None, ge=0)
     frac_budget: float | None = Field(None, ge=0)
     frac_poll_seconds: int | None = Field(None, ge=10)
+    long_confidence_floor: float | None = Field(None, ge=0, le=100)
+    short_confidence_floor: float | None = Field(None, ge=0, le=100)
+    pe_overbought: float | None = Field(None, ge=0)
+    pe_oversold: float | None = Field(None, ge=0)
+    trading_days: str | None = Field(None, description="Comma-separated day indices 0=Mon…6=Sun")
+    eod_close_window_minutes: int | None = Field(None, ge=0, le=120)
 
 
 @router.post("/settings/alerts")
@@ -204,6 +210,18 @@ def set_autotrade(request: AutoTradeSettingRequest) -> dict[str, Any]:
         set_setting("frac_budget", str(request.frac_budget))
     if request.frac_poll_seconds is not None:
         set_setting("frac_poll_seconds", str(request.frac_poll_seconds))
+    if request.long_confidence_floor is not None:
+        set_setting("long_confidence_floor", str(request.long_confidence_floor))
+    if request.short_confidence_floor is not None:
+        set_setting("short_confidence_floor", str(request.short_confidence_floor))
+    if request.pe_overbought is not None:
+        set_setting("pe_overbought", str(request.pe_overbought))
+    if request.pe_oversold is not None:
+        set_setting("pe_oversold", str(request.pe_oversold))
+    if request.trading_days is not None:
+        set_setting("trading_days", request.trading_days)
+    if request.eod_close_window_minutes is not None:
+        set_setting("eod_close_window_minutes", str(request.eod_close_window_minutes))
     _cfg_event("autotrade", {k: v for k, v in request.model_dump().items() if v is not None})
     return {"saved": True}
 
@@ -361,6 +379,30 @@ def get_all_settings(provider: str | None = Query(None)) -> dict[str, Any]:
             get_setting("volume_spike_multiplier", "") or cfg.thresholds.volume_spike_multiplier
         ),
         "volume_spike_multiplier_env": cfg.thresholds.volume_spike_multiplier,
+        "long_confidence_floor": float(
+            get_setting("long_confidence_floor", "") or cfg.thresholds.long_confidence_floor
+        ),
+        "long_confidence_floor_env": cfg.thresholds.long_confidence_floor,
+        "short_confidence_floor": float(
+            get_setting("short_confidence_floor", "") or cfg.thresholds.short_confidence_floor
+        ),
+        "short_confidence_floor_env": cfg.thresholds.short_confidence_floor,
+        "pe_overbought": float(
+            get_setting("pe_overbought", "") or cfg.thresholds.pe_overbought
+        ),
+        "pe_overbought_env": cfg.thresholds.pe_overbought,
+        "pe_oversold": float(
+            get_setting("pe_oversold", "") or cfg.thresholds.pe_oversold
+        ),
+        "pe_oversold_env": cfg.thresholds.pe_oversold,
+        "trading_days": (
+            get_setting("trading_days", "") or ",".join(str(d) for d in cfg.market_hours.trading_days)
+        ),
+        "trading_days_env": ",".join(str(d) for d in cfg.market_hours.trading_days),
+        "eod_close_window_minutes": int(
+            get_setting("eod_close_window_minutes", "") or 15
+        ),
+        "eod_close_window_minutes_env": 15,
         "market_hours": {
             "timezone": cfg.market_hours.timezone,
             "open": f"{cfg.market_hours.open_hour:02d}:{cfg.market_hours.open_minute:02d}",

@@ -266,6 +266,12 @@ def _current_tuning(mode: str | None = None) -> dict[str, str]:
         "VOLUME_SPIKE_MULTIPLIER": _ov("volume_spike_multiplier", th.volume_spike_multiplier),
         "SIGNIFICANT_MOVE_PCT": _ov("significant_move_pct", th.significant_move_pct),
         "CONFIDENCE_FLOOR": _ov("confidence_floor", th.confidence_floor),
+        "LONG_CONFIDENCE_FLOOR": _ov("long_confidence_floor", th.long_confidence_floor),
+        "SHORT_CONFIDENCE_FLOOR": _ov("short_confidence_floor", th.short_confidence_floor),
+        "PE_OVERBOUGHT": _ov("pe_overbought", th.pe_overbought),
+        "PE_OVERSOLD": _ov("pe_oversold", th.pe_oversold),
+        "TRADING_DAYS": _ov("trading_days", ",".join(str(d) for d in cfg.market_hours.trading_days)),
+        "EOD_CLOSE_WINDOW_MINUTES": _ov("eod_close_window_minutes", 15),
         "SIGNAL_DROP_MODE": _ov("signal_drop_mode", at.signal_drop_mode),
         "DISCOVERY_MIN_SCORE": _ov("discovery_min_score", disc.min_score),
         "DISCOVERY_AUTOADD_ENABLED": _ov("discovery_autoadd_enabled", disc.autoadd_enabled),
@@ -298,6 +304,12 @@ _TUNING_ALLOWED: dict[str, str] = {
     "VOLUME_SPIKE_MULTIPLIER": "number >= 0 (x average volume)",
     "SIGNIFICANT_MOVE_PCT": "percent > 0 (env-only)",
     "CONFIDENCE_FLOOR": "0-100",
+    "LONG_CONFIDENCE_FLOOR": "0-100 (0 = use CONFIDENCE_FLOOR for long orders)",
+    "SHORT_CONFIDENCE_FLOOR": "0-100 (0 = use CONFIDENCE_FLOOR for short orders)",
+    "PE_OVERBOUGHT": "number >= 0 (P/E above this = overvalued)",
+    "PE_OVERSOLD": "number >= 0 (P/E below this = undervalued, must be < PE_OVERBOUGHT)",
+    "TRADING_DAYS": "comma-separated day indices 0=Mon…6=Sun (e.g. 0,1,2,3,4)",
+    "EOD_CLOSE_WINDOW_MINUTES": "integer 0-120 (minutes before close to stop new positions)",
     "SIGNAL_DROP_MODE": (
         "exactly one of untradable | strict | never. untradable drops signals that can "
         "neither bracket nor frac; strict is currently identical; never keeps them but they "
@@ -464,6 +476,38 @@ def _llm_report(
         )
         return None, None, None, 0, 0
     return data, model, effective_provider, pt or 0, ct or 0
+
+
+_CONN_HTTP_REASONS = {
+    401: "authentication rejected (HTTP 401) — check the API key and secret",
+    403: "access forbidden (HTTP 403) — check account permissions",
+    404: "endpoint not found (HTTP 404) — check the API URL includes /v2",
+    429: "rate limited by Alpaca (HTTP 429)",
+}
+
+
+def _safe_conn_error(label: str, exc: Exception) -> str:
+    """Map a connection-probe failure to a fixed, user-safe reason.
+
+    The raw exception (which can carry Alpaca response bodies and network
+    internals) is logged server-side only; every returned string is a constant
+    so nothing from the exception reaches report bodies or notifications.
+    """
+    _log.warning("%s Alpaca connection check failed: %s", label, _log_safe(str(exc)))
+    text = str(exc)
+    if "network error" in text:
+        return "network error — Alpaca unreachable"
+    if "HTTPS" in text or "hostname" in text:
+        return "invalid Alpaca API URL setting"
+    m = re.search(r"→ (\d{3})", text)
+    if m:
+        code = int(m.group(1))
+        if code in _CONN_HTTP_REASONS:
+            return _CONN_HTTP_REASONS[code]
+        if code >= 500:
+            return "Alpaca server error (HTTP 5xx)"
+        return "request rejected by Alpaca (HTTP 4xx)"
+    return "unexpected error — see server logs"
 
 
 def _fmt_tuning(items: list[Any]) -> list[str]:
@@ -746,19 +790,66 @@ def _run_report(
     # blocked, or the frac profile disabled between runs).
     frac_conn: dict[str, Any] = {"ok": False, "error": "not checked"}
     try:
-        from backend.alpaca import AlpacaError, get_frac_client
+        from backend.alpaca import get_frac_client
+        from backend.config import get_settings as _gcfg
 
-        _frac_acct = get_frac_client().get_account()
-        frac_conn = {
-            "ok": True,
-            "account_status": _frac_acct.get("status"),
-            "trading_blocked": _frac_acct.get("trading_blocked", False),
-            "buying_power": _frac_acct.get("buying_power"),
-            "equity": _frac_acct.get("equity"),
-        }
+        _fcfg = _gcfg().frac
+        _frac_key = get_setting("frac_alpaca_key_id", "") or _fcfg.key_id
+        _frac_sec = get_setting("frac_alpaca_secret_key", "") or _fcfg.secret_key
+        frac_conn["key_configured"] = bool(_frac_key)
+        frac_conn["secret_configured"] = bool(_frac_sec)
+
+        if not _frac_key or not _frac_sec:
+            frac_conn["error"] = "credentials not configured" + (
+                " (key missing)" if not _frac_key else " (secret missing)"
+            )
+        else:
+            _frac_acct = get_frac_client().get_account()
+            frac_conn = {
+                "ok": True,
+                "key_configured": True,
+                "secret_configured": True,
+                "account_status": _frac_acct.get("status"),
+                "trading_blocked": _frac_acct.get("trading_blocked", False),
+                "buying_power": _frac_acct.get("buying_power"),
+                "equity": _frac_acct.get("equity"),
+            }
     except Exception as _exc:
-        frac_conn = {"ok": False, "error": str(_exc)}
+        frac_conn["ok"] = False
+        frac_conn["error"] = _safe_conn_error("Frac", _exc)
     context["frac_connection"] = frac_conn
+
+    # Probe the primary (orders) Alpaca connection.
+    orders_conn: dict[str, Any] = {"ok": False, "error": "not checked"}
+    try:
+        from backend.alpaca import get_client
+        from backend.config import get_settings as _gcfg2
+
+        _ocfg = _gcfg2().alpaca
+        _ord_key = get_setting("alpaca_key_id", "") or _ocfg.key_id
+        _ord_sec = get_setting("alpaca_secret_key", "") or _ocfg.secret_key
+        orders_conn["key_configured"] = bool(_ord_key)
+        orders_conn["secret_configured"] = bool(_ord_sec)
+
+        if not _ord_key or not _ord_sec:
+            orders_conn["error"] = "credentials not configured" + (
+                " (key missing)" if not _ord_key else " (secret missing)"
+            )
+        else:
+            _ord_acct = get_client().get_account()
+            orders_conn = {
+                "ok": True,
+                "key_configured": True,
+                "secret_configured": True,
+                "account_status": _ord_acct.get("status"),
+                "trading_blocked": _ord_acct.get("trading_blocked", False),
+                "buying_power": _ord_acct.get("buying_power"),
+                "equity": _ord_acct.get("equity"),
+            }
+    except Exception as _exc:
+        orders_conn["ok"] = False
+        orders_conn["error"] = _safe_conn_error("Orders", _exc)
+    context["orders_connection"] = orders_conn
 
     metrics = _combined_metrics(
         window_label, report_eco, report_feco, signals, report_top_bracket, report_top_frac
@@ -872,22 +963,34 @@ def _run_report(
         model_setting_key="llm_model_range" if is_range else None,
     )
 
-    # Append frac connection status line so it always appears regardless of LLM output.
-    if frac_conn.get("ok"):
-        _bp = frac_conn.get("buying_power")
-        _eq = frac_conn.get("equity")
-        _blocked = frac_conn.get("trading_blocked")
-        _acct_status = frac_conn.get("account_status", "")
-        _conn_line = (
-            f"🔗 Frac connection: OK · {_acct_status}"
-            + (f" · equity ${_eq}" if _eq is not None else "")
-            + (f" · buying power ${_bp}" if _bp is not None else "")
-            + (" · ⚠️ trading blocked" if _blocked else "")
-        )
-    else:
-        _conn_line = f"🔴 Frac connection FAILED: {frac_conn.get('error', 'unknown error')}"
-    notification_body = notification_body + "\n\n" + _conn_line
-    full_body = full_body + "\n\n" + _conn_line
+    # Append connection status lines (orders + frac) so they always appear
+    # regardless of LLM output — surfaces silent credential/connectivity failures.
+    def _alpaca_status_line(label: str, conn: dict) -> str:
+        if conn.get("ok"):
+            _bp = conn.get("buying_power")
+            _eq = conn.get("equity")
+            _blocked = conn.get("trading_blocked")
+            _st = conn.get("account_status", "")
+            return (
+                f"🔗 {label}: OK · {_st}"
+                + (f" · equity ${_eq}" if _eq is not None else "")
+                + (f" · buying power ${_bp}" if _bp is not None else "")
+                + (" · ⚠️ trading blocked" if _blocked else "")
+            )
+        _key_ok = conn.get("key_configured")
+        _sec_ok = conn.get("secret_configured")
+        if _key_ok is False or _sec_ok is False:
+            _det = ("key ✗" if not _key_ok else "") + (" secret ✗" if not _sec_ok else "")
+            return f"🔴 {label}: credentials not set ({_det.strip()})"
+        return f"🔴 {label} FAILED: {conn.get('error', 'unknown error')}"
+
+    _status_block = (
+        _alpaca_status_line("Orders", orders_conn)
+        + "\n"
+        + _alpaca_status_line("Frac", frac_conn)
+    )
+    notification_body = notification_body + "\n\n" + _status_block
+    full_body = full_body + "\n\n" + _status_block
 
     results: dict[str, Any] = {}
     if notify:

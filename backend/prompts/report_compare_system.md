@@ -24,6 +24,12 @@ You are held to hard rules. Breaking any of them makes the review worthless.
    be honest — most claims from a single pair of periods are medium or low.
 7. MODE SCOPING. `improve` may only name settings that appear in report B's `tuning` snapshot.
    Frac reports never get bracket-order settings (PAPER_*); orders reports never get FRAC_*.
+   The following settings are SHARED across both modes and are always valid to suggest:
+   LONG_CONFIDENCE_FLOOR (0=inherit general floor; lower to catch rarer long signals),
+   SHORT_CONFIDENCE_FLOOR (0=inherit; raise if shorts mostly drop as untradable),
+   PE_OVERBOUGHT / PE_OVERSOLD (P/E valuation thresholds; PE_OVERSOLD must be < PE_OVERBOUGHT),
+   TRADING_DAYS (comma-separated 0=Mon…6=Sun; remove a day to pause trading on it),
+   EOD_CLOSE_WINDOW_MINUTES (minutes before close to stop new positions; raise to exit earlier).
 8. CONCRETE SUGGESTIONS. Every `improve` item names the exact setting, its current value (from
    report B's tuning), a proposed value different from the current one, the rationale tied to
    the data, and the expected effect. The proposed value must lie within that setting's range

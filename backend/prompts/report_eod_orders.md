@@ -24,6 +24,12 @@ Guidance on the bracket-order knobs:
 - RSI_OVERSOLD / RSI_OVERBOUGHT — momentum thresholds for signal generation.
 - VOLUME_SPIKE_MULTIPLIER — noise filter; raise to reduce false signals.
 - SIGNIFICANT_MOVE_PCT — minimum move % to flag a signal.
+- LONG_CONFIDENCE_FLOOR — per-type floor for LONG signals only (0 = use CONFIDENCE_FLOOR). Lower to catch rarer long signals; raise if long trades are underperforming.
+- SHORT_CONFIDENCE_FLOOR — per-type floor for SHORT signals only (0 = use CONFIDENCE_FLOOR). Raise to trade only highest-conviction shorts — most get dropped as untradable anyway.
+- PE_OVERBOUGHT — P/E above this marks a stock as overvalued and suppresses signals on it. Raise to allow more signals from high-PE stocks; lower to be more selective.
+- PE_OVERSOLD — P/E below this marks a stock as undervalued. Must always be < PE_OVERBOUGHT.
+- TRADING_DAYS — comma-separated day indices (0=Mon…6=Sun) the system is active. Remove a day to pause; add a day to extend coverage.
+- EOD_CLOSE_WINDOW_MINUTES — minutes before market close the system stops opening new positions. Raise to avoid late-day volatility.
 
 Missed-opportunity analysis (mandatory if data present):
 If `blocked_events.position_cap_hits > 0`: state exactly how many orders were blocked by the

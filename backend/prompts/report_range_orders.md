@@ -45,6 +45,12 @@ Guidance on the bracket-order knobs:
   poorly timed; tighten RSI range (move OVERSOLD up, OVERBOUGHT down) to be more selective.
 - VOLUME_SPIKE_MULTIPLIER — noise filter. Raise if signals in low-volume periods are losing.
 - SIGNIFICANT_MOVE_PCT — minimum move to flag. Raise to ignore small-range chop sessions.
+- LONG_CONFIDENCE_FLOOR — per-type floor for LONG signals only (0 = use CONFIDENCE_FLOOR). Lower to catch rarer long signals; raise if long trades are underperforming over the window.
+- SHORT_CONFIDENCE_FLOOR — per-type floor for SHORT signals only (0 = use CONFIDENCE_FLOOR). Raise to trade only highest-conviction shorts — most get dropped as untradable anyway.
+- PE_OVERBOUGHT — P/E above this marks a stock as overvalued and suppresses signals on it. Raise to allow more signals from high-PE stocks; lower to be more selective.
+- PE_OVERSOLD — P/E below this marks a stock as undervalued. Must always be < PE_OVERBOUGHT.
+- TRADING_DAYS — comma-separated day indices (0=Mon…6=Sun) the system is active. Remove a day to pause; add a day to extend coverage.
+- EOD_CLOSE_WINDOW_MINUTES — minutes before market close the system stops opening new positions. Raise to avoid late-day volatility; check if losses cluster near close.
 
 Missed-opportunity analysis (mandatory if data present):
 For `position_cap_hits` and `insufficient_funds_hits`, if > 0: state the count, estimate missed
