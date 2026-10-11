@@ -176,6 +176,31 @@ Shown as soon as at least one order exists:
 
 The last three charts (realised) only appear once orders have been filled and closed.
 
+### Ticker Ledger
+
+A collapsible **📒 Ticker Ledger** card sits below the orders table. It aggregates all closed trades by ticker:
+
+| Column | Description |
+|---|---|
+| Ticker | Stock symbol |
+| Trades | Number of closed orders for this ticker |
+| Invested | Total notional dollars deployed |
+| Wins | Count of profitable trades |
+| Losses | Count of losing trades |
+| Total P&L | Cumulative realised P&L |
+| Last closed | Date of most recent close |
+
+Click any summary row to expand a **balance-sheet drilldown**, oldest first, with one row per event:
+
+| Event | Shows |
+|---|---|
+| `📡 Signal scan` | The most recent signal for the ticker before the order was placed — signal type and confidence (fetched from `GET /signals?ticker=`) |
+| `▲ LONG Placed` / `▼ SHORT Placed` | Entry price, notional, share count, stop price |
+| `✓ Filled` | Fill price (only when Alpaca reported a fill) |
+| `⏹ Closed` / `↩ Cashout` | Exit price and realised P&L. A manual cashout is paired with the bracket order it closed, so the trade reads Placed → Filled → Cashout |
+
+A `Fees: $0 ⓘ` label in the Closed Orders header confirms that Alpaca paper accounts charge $0 commission; all P&L is already net of fees.
+
 ### Open Positions
 
 Live from Alpaca `GET /v2/positions`: Ticker · Side · Qty · Avg Entry · Current
@@ -368,7 +393,15 @@ The **🪙 Fractional Trading** tab shows a **Paper/Live** mode badge (with a
 real-money banner when live), account tiles, a **readiness readout** (closed
 trades / win rate / realized P&L on paper), an **open positions** table with a
 **💵 Cash out** button, and a **closed trades** table (with exit reason + realized
-P&L).
+P&L, and a `Fees: $0 ⓘ` label).
+
+The **📒 Fractional — Ticker Ledger** at the bottom groups every fractional position
+(open and closed) by ticker, with the same summary columns as the Order Trading
+ledger. Expanding a ticker shows `▲ Opened` (entry price, notional, shares) followed
+by the exit — `✅ Target`, `🛑 Stop`, `🌙 EoD` or `🔄 Reconciled`, with exit price and
+realised P&L — or `⏳ Holding` while the position is still open. Tickers with an open
+position show `⏳ open` instead of a last-closed date; Total P&L counts closed
+positions only.
 
 ### Settings — Live / Fractional Trading
 
@@ -408,6 +441,36 @@ P&L).
   are unmanaged until it restarts.
 - **Market hours.** Fractional orders are `day`-only (Alpaca does not allow `gtc`
   for fractional), so they trade during regular US hours only.
+
+---
+
+## Earnings tab
+
+The **💰 Earnings** tab (third tab in the Trading page) gives a consolidated view across both trading flows.
+
+### Today's P&L
+
+Three tiles — **Orders**, **Frac**, **Combined** — each showing today's Day P&L (from `GET /paper/account` and `GET /frac/account`). Equity tiles appear when account data is available.
+
+### All-time summary
+
+**Order Trading — all-time**, **Fractional Trading — all-time** and **Combined — all-time** blocks, each showing:
+
+| Tile | Description |
+|---|---|
+| Realised P&L | Sum of all `realized_pnl` across closed orders/positions |
+| Closed trades | Count of closed orders/positions with a P&L |
+| Win rate | Win % with W/L count breakdown |
+| Gross wins / Gross losses | Sum of P&L over winning trades / losing trades (per-flow blocks) |
+| Open positions | Count with notional at risk (per-flow blocks, when > 0) |
+
+Each block has a **Show charts** toggle that reveals a Win/Loss pie and a P&L breakdown bar (avg win, avg loss, gross win, gross loss, net). With no closed trades yet, the toggle shows a "nothing to chart" note instead.
+
+### API
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/reports/economics` | All-time economics: `{orders, frac, combined}` with `closed_trades`, `wins`, `losses`, `total_pnl`, `win_pnl`, `loss_pnl`, `win_rate`; `orders`/`frac` also carry `open_positions`, `notional_open` |
 
 ---
 
@@ -471,12 +534,16 @@ API call never discards a valid signal; any real rejection happens at order plac
 |---|---|---|---|
 | Paper auto-trade | `PAPER_TRADING_ENABLED` | `true` | Master switch for auto bracket orders |
 | Frac auto-trade | `FRAC_TRADING_ENABLED` | `false` | Master switch for auto fractional buys |
-| Signal confidence floor (all modes) | `CONFIDENCE_FLOOR` | `75` | Min confidence for any setup to become a signal; gates alerts, bracket and fractional orders. The bracket-only and fractional floors can only add a stricter check on top. |
+| Signal confidence floor (all modes) | `CONFIDENCE_FLOOR` | `75` | Min confidence for any setup to become a signal; gates alerts, bracket and fractional orders. Direction-specific floors can only add a stricter check on top. |
 | Fractional floor | `FRAC_MIN_CONFIDENCE` | `85` | Stricter floor for fractional buys |
 | Bracket-only floor | `PAPER_TRADE_MIN_CONFIDENCE` | `0` | Optional; 0 = use the signal floor |
+| Long confidence floor | `LONG_CONFIDENCE_FLOOR` | `0` | Per-direction floor for long signals (frac + bracket). 0 = inherit `CONFIDENCE_FLOOR`. Useful to require stronger conviction for longs without affecting shorts. |
+| Short confidence floor | `SHORT_CONFIDENCE_FLOOR` | `0` | Per-direction floor for short signals (bracket only — frac is long-only). 0 = inherit `CONFIDENCE_FLOOR`. Raise if shorts mostly drop as untradable. |
 | Max bracket positions | `PAPER_MAX_POSITIONS` | `5` | Hold new bracket orders past this many open positions |
 | Signal drop rule | `SIGNAL_DROP_MODE` | `untradable` | `untradable` \| `strict` \| `never` |
 | Allow live auto-frac | `FRAC_AUTOTRADE_ALLOW_LIVE` | `false` | Safety rail — see below |
+| Active trading days | `TRADING_DAYS` | `0,1,2,3,4` | Comma-separated day indices (0=Mon…6=Sun). Remove a day to pause scanning on it without restarting. |
+| EoD close window | `EOD_CLOSE_WINDOW_MINUTES` | `15` | Minutes before market close in which no new positions are opened. Raise to exit earlier near the close. |
 | Discovery auto-add | `DISCOVERY_AUTOADD_ENABLED` | `false` | Auto-add tradable high-score candidates to the watchlist |
 | Discovery auto-add cap | `DISCOVERY_AUTOADD_TOP_N` | `5` | Max candidates auto-added per run (strongest N by score) |
 

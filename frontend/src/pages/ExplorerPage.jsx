@@ -43,7 +43,7 @@ function macroStatus(key, value) {
 export default function ExplorerPage({ initialResult, onBack, modelName, onOpenInExplorer }) {
   const [ticker, setTicker] = useState(initialResult?.ticker ?? '')
   const { streaming, steps, result: streamResult, error, run } = useAnalyzeStream()
-  const [historyExpanded, setHistoryExpanded] = useState(false)
+  const [historyExpanded, setHistoryExpanded] = useState(true)
   // Section 7 place-order state — must live here, not inside the render IIFE
   const [sec7Orders, setSec7Orders] = useState({})
   const [sec7Frac, setSec7Frac] = useState({})
@@ -65,7 +65,6 @@ export default function ExplorerPage({ initialResult, onBack, modelName, onOpenI
     <div className="explorer-page">
       {/* Top bar */}
       <div className="explorer-topbar">
-        <button className="btn-ghost" onClick={onBack}>← Dashboard</button>
         <span className="explorer-title">Analysis Explorer</span>
         <div className="analyze-row" style={{ flex: 1, maxWidth: 380 }}>
           <input
@@ -110,8 +109,7 @@ export default function ExplorerPage({ initialResult, onBack, modelName, onOpenI
           </div>
         ) : (
           <div className="explorer-empty">
-            Enter a ticker above and click <strong>Run Analysis</strong> to begin the walkthrough.<br />
-            <span style={{ fontSize: 12 }}>Or expand the Analysis History panel below to open a saved run.</span>
+            Enter a ticker above and click <strong>Run Analysis</strong> to begin the walkthrough, or select a saved run from the history panel above.
           </div>
         )
       )}

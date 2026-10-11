@@ -98,16 +98,45 @@ def _build_eod(
     frac_today: list[dict[str, Any]] | None = None,
     frac_eco: dict[str, Any] | None = None,
     window_label: str = "today",
+    window_eco: dict[str, Any] | None = None,
+    window_frac_eco: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Return (subject, body) for the digest. *window_label* names the activity
     window in section headers (e.g. "today" for EoD, "this week" for weekly).
-    *order_eco* / *frac_eco* are all-time economics; ``None`` omits that section."""
+    *order_eco* / *frac_eco* are all-time economics; ``None`` omits that section.
+    *window_eco* / *window_frac_eco* are period-only economics shown first."""
 
     subject = f"MarketSage EoD — {date_str}"
 
     lines: list[str] = [f"📊 {subject}", ""]
 
-    # ── Paper bracket economics (omitted for frac-only reports) ──────────────
+    # ── Period earnings (this window) — shown first ────────────────────────
+    period_shown = False
+    if window_eco is not None and (window_eco.get("closed_trades") or 0) > 0:
+        weco = window_eco
+        wr = f"{weco['win_rate']:.0f}%" if weco.get("win_rate") is not None else "n/a"
+        sign = "+" if weco["total_pnl"] >= 0 else ""
+        lines.append(f"── Period earnings ({window_label}) ──")
+        lines.append(f"  P&L         : {sign}${weco['total_pnl']:.2f}")
+        lines.append(f"  Wins        : {weco['wins']}  (+${weco['win_pnl']:.2f})")
+        lines.append(f"  Losses      : {weco['losses']}  (-${abs(weco['loss_pnl']):.2f})")
+        lines.append(f"  Win rate    : {wr}  ({weco['wins']}/{weco['closed_trades']} closed)")
+        period_shown = True
+    if window_frac_eco is not None and (window_frac_eco.get("closed_trades") or 0) > 0:
+        wfeco = window_frac_eco
+        fwr = f"{wfeco['win_rate']:.0f}%" if wfeco.get("win_rate") is not None else "n/a"
+        fsign = "+" if wfeco["total_pnl"] >= 0 else ""
+        if not period_shown:
+            lines.append(f"── Period earnings ({window_label}) ──")
+        else:
+            lines.append(f"  ── Fractional ──")
+        lines.append(f"  P&L         : {fsign}${wfeco['total_pnl']:.2f}")
+        lines.append(f"  Win rate    : {fwr}  ({wfeco['wins']}/{wfeco['closed_trades']} closed)")
+        period_shown = True
+    if period_shown:
+        lines.append("")
+
+    # ── Paper bracket economics (all-time, omitted for frac-only reports) ─────
     if order_eco is not None:
         eco = order_eco
         lines.append("── Paper bracket (all-time) ──")
@@ -266,6 +295,12 @@ def _current_tuning(mode: str | None = None) -> dict[str, str]:
         "VOLUME_SPIKE_MULTIPLIER": _ov("volume_spike_multiplier", th.volume_spike_multiplier),
         "SIGNIFICANT_MOVE_PCT": _ov("significant_move_pct", th.significant_move_pct),
         "CONFIDENCE_FLOOR": _ov("confidence_floor", th.confidence_floor),
+        "LONG_CONFIDENCE_FLOOR": _ov("long_confidence_floor", th.long_confidence_floor),
+        "SHORT_CONFIDENCE_FLOOR": _ov("short_confidence_floor", th.short_confidence_floor),
+        "PE_OVERBOUGHT": _ov("pe_overbought", th.pe_overbought),
+        "PE_OVERSOLD": _ov("pe_oversold", th.pe_oversold),
+        "TRADING_DAYS": _ov("trading_days", ",".join(str(d) for d in cfg.market_hours.trading_days)),
+        "EOD_CLOSE_WINDOW_MINUTES": _ov("eod_close_window_minutes", 15),
         "SIGNAL_DROP_MODE": _ov("signal_drop_mode", at.signal_drop_mode),
         "DISCOVERY_MIN_SCORE": _ov("discovery_min_score", disc.min_score),
         "DISCOVERY_AUTOADD_ENABLED": _ov("discovery_autoadd_enabled", disc.autoadd_enabled),
@@ -298,6 +333,12 @@ _TUNING_ALLOWED: dict[str, str] = {
     "VOLUME_SPIKE_MULTIPLIER": "number >= 0 (x average volume)",
     "SIGNIFICANT_MOVE_PCT": "percent > 0 (env-only)",
     "CONFIDENCE_FLOOR": "0-100",
+    "LONG_CONFIDENCE_FLOOR": "0-100 (0 = use CONFIDENCE_FLOOR for long orders)",
+    "SHORT_CONFIDENCE_FLOOR": "0-100 (0 = use CONFIDENCE_FLOOR for short orders)",
+    "PE_OVERBOUGHT": "number >= 0 (P/E above this = overvalued)",
+    "PE_OVERSOLD": "number >= 0 (P/E below this = undervalued, must be < PE_OVERBOUGHT)",
+    "TRADING_DAYS": "comma-separated day indices 0=Mon…6=Sun (e.g. 0,1,2,3,4)",
+    "EOD_CLOSE_WINDOW_MINUTES": "integer 0-120 (minutes before close to stop new positions)",
     "SIGNAL_DROP_MODE": (
         "exactly one of untradable | strict | never. untradable drops signals that can "
         "neither bracket nor frac; strict is currently identical; never keeps them but they "
@@ -372,6 +413,8 @@ def _combined_metrics(
     signals: list[dict[str, Any]],
     top_bracket: list[dict[str, Any]],
     top_frac: list[dict[str, Any]],
+    window_eco: dict[str, Any] | None = None,
+    window_frac_eco: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Compute the headline figures interpolated into the prompt + notification."""
     total = (eco.get("total_pnl") or 0) + (feco.get("total_pnl") or 0)
@@ -380,16 +423,27 @@ def _combined_metrics(
     win_rate = f"{wins / closed * 100:.0f}%" if closed else "n/a"
     sign = "+" if total >= 0 else ""
     movers = [f"{o['ticker']} {o.get('realized_pnl'):+.2f}" for o in (top_bracket + top_frac)[:5]]
+    period_total = (
+        (window_eco.get("total_pnl") or 0 if window_eco else 0)
+        + (window_frac_eco.get("total_pnl") or 0 if window_frac_eco else 0)
+    )
+    period_sign = "+" if period_total >= 0 else ""
     return {
         "PERIOD": window_label,
         "WINDOW_LABEL": window_label,
         "TOTAL_PNL": f"{sign}${total:.2f}",
+        "ALL_TIME_PNL": f"{sign}${total:.2f}",
+        "PERIOD_PNL": f"{period_sign}${period_total:.2f}",
         "WIN_RATE": win_rate,
         "CLOSED_TRADES": str(closed),
         "SIGNALS_COUNT": str(len(signals)),
         "TOP_MOVERS": ", ".join(movers) or "none",
-        "_pnl_line": f"P&L {sign}${total:.2f} · Win rate {win_rate} · {closed} closed",
+        "_pnl_line": f"Period P&L {period_sign}${period_total:.2f} · All-time {sign}${total:.2f} · Win rate {win_rate} · {closed} closed",
     }
+
+
+_LLM_REPORT_RETRY_DELAY = 60   # seconds to wait before the one automatic retry
+_LLM_REPORT_MAX_ATTEMPTS = 2   # initial attempt + 1 retry
 
 
 def _llm_report(
@@ -405,9 +459,15 @@ def _llm_report(
     *model_setting_key* names the ``provider:model`` override setting; it
     defaults to ``llm_model_{report_type}``.
 
+    On transient failure the call is retried once after ``_LLM_REPORT_RETRY_DELAY``
+    seconds so a brief provider outage at cron-trigger time doesn't silently produce
+    a digest-only report.
+
     Returns ``(data, model, provider, prompt_tokens, completion_tokens)``.
     All values are None/0 on failure.
     """
+    import time
+
     from backend.analysis import LLMError, call_llm
 
     key = model_setting_key or (f"llm_model_{report_type}" if report_type else "")
@@ -423,34 +483,54 @@ def _llm_report(
     tokens["CONTEXT_JSON"] = json.dumps(context, default=str)
     tokens["TUNING_CONFIG"] = _render_tuning(tuning)
     prompt = _render_prompt(prompt_file, tokens)
-    try:
-        raw, model, pt, ct = call_llm(
-            prompt,
-            system_prompt="You are a precise trading analyst. Return only compact JSON.",
-            model=model_override,
-            use_fallback=True,
-            _primary_provider_override=provider_override,
-        )
-        # Strip markdown code fences that some providers (e.g. Gemini) add around JSON.
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw, count=1)
-            raw = re.sub(r"\s*```\s*$", "", raw)
+
+    last_exc: Exception | None = None
+    for attempt in range(1, _LLM_REPORT_MAX_ATTEMPTS + 1):
+        try:
+            raw, model, pt, ct = call_llm(
+                prompt,
+                system_prompt="You are a precise trading analyst. Return only compact JSON.",
+                model=model_override,
+                use_fallback=True,
+                _primary_provider_override=provider_override,
+            )
+            # Strip markdown code fences that some providers (e.g. Gemini) add around JSON.
             raw = raw.strip()
-        data = json.loads(raw)
-    except (LLMError, ValueError, TypeError, OSError) as exc:
-        _log.warning("LLM report generation failed: %s", exc)
+            if raw.startswith("```"):
+                raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw, count=1)
+                raw = re.sub(r"\s*```\s*$", "", raw)
+                raw = raw.strip()
+            data = json.loads(raw)
+            break  # success
+        except (LLMError, ValueError, TypeError, OSError) as exc:
+            last_exc = exc
+            if attempt < _LLM_REPORT_MAX_ATTEMPTS:
+                _log.warning(
+                    "LLM report attempt %d/%d failed (%s) — retrying in %ds",
+                    attempt, _LLM_REPORT_MAX_ATTEMPTS, exc, _LLM_REPORT_RETRY_DELAY,
+                )
+                save_event(
+                    "report",
+                    f"LLM attempt {attempt}/{_LLM_REPORT_MAX_ATTEMPTS} failed — retrying in {_LLM_REPORT_RETRY_DELAY}s",
+                    level="warn",
+                    meta={"error": str(exc), "attempt": attempt},
+                )
+                time.sleep(_LLM_REPORT_RETRY_DELAY)
+    else:
+        # All attempts exhausted
+        _log.warning("LLM report generation failed after %d attempts: %s", _LLM_REPORT_MAX_ATTEMPTS, last_exc)
         provider_label = f"{effective_provider}" + (
             f" ({model_override})" if model_override else ""
         )
         save_event(
             "report",
-            f"LLM call failed [{provider_label}]: {exc}",
+            f"LLM call failed [{provider_label}] after {_LLM_REPORT_MAX_ATTEMPTS} attempts: {last_exc}",
             level="error",
             meta={
-                "error": str(exc),
+                "error": str(last_exc),
                 "provider": effective_provider,
                 "model_override": model_override,
+                "attempts": _LLM_REPORT_MAX_ATTEMPTS,
             },
         )
         return None, None, None, 0, 0
@@ -464,6 +544,38 @@ def _llm_report(
         )
         return None, None, None, 0, 0
     return data, model, effective_provider, pt or 0, ct or 0
+
+
+_CONN_HTTP_REASONS = {
+    401: "authentication rejected (HTTP 401) — check the API key and secret",
+    403: "access forbidden (HTTP 403) — check account permissions",
+    404: "endpoint not found (HTTP 404) — check the API URL includes /v2",
+    429: "rate limited by Alpaca (HTTP 429)",
+}
+
+
+def _safe_conn_error(label: str, exc: Exception) -> str:
+    """Map a connection-probe failure to a fixed, user-safe reason.
+
+    The raw exception (which can carry Alpaca response bodies and network
+    internals) is logged server-side only; every returned string is a constant
+    so nothing from the exception reaches report bodies or notifications.
+    """
+    _log.warning("%s Alpaca connection check failed: %s", label, _log_safe(str(exc)))
+    text = str(exc)
+    if "network error" in text:
+        return "network error — Alpaca unreachable"
+    if "HTTPS" in text or "hostname" in text:
+        return "invalid Alpaca API URL setting"
+    m = re.search(r"→ (\d{3})", text)
+    if m:
+        code = int(m.group(1))
+        if code in _CONN_HTTP_REASONS:
+            return _CONN_HTTP_REASONS[code]
+        if code >= 500:
+            return "Alpaca server error (HTTP 5xx)"
+        return "request rejected by Alpaca (HTTP 4xx)"
+    return "unexpected error — see server logs"
 
 
 def _fmt_tuning(items: list[Any]) -> list[str]:
@@ -536,8 +648,10 @@ def _compose_report(
     tuning = _fmt_tuning(data.get("tuning") or [])
 
     # Short notification version — sent to ntfy / Telegram.
-    # Includes: headline · prose summary · top suggestion · top tuning hint.
+    # Includes: headline · P&L line · prose summary · top suggestion · top tuning hint.
     notif_lines = [f"📊 {headline}"]
+    if pnl_line:
+        notif_lines += ["", pnl_line]
     if notification:
         notif_lines += ["", notification]
     if suggestions:
@@ -740,8 +854,82 @@ def _run_report(
     context["window"] = {"start": since, "end": date_str, "days": window_days}
     context["window_economics"] = window_eco
     context["tuning"] = _current_tuning(mode)
+
+    # Probe the frac Alpaca connection so the LLM and the notification body can
+    # flag a silent credential/connectivity failure (e.g. secret rotated, account
+    # blocked, or the frac profile disabled between runs).
+    frac_conn: dict[str, Any] = {"ok": False, "error": "not checked"}
+    try:
+        from backend.alpaca import get_frac_client
+        from backend.config import get_settings as _gcfg
+
+        _fcfg = _gcfg().frac
+        _frac_key = get_setting("frac_alpaca_key_id", "") or _fcfg.key_id
+        _frac_sec = get_setting("frac_alpaca_secret_key", "") or _fcfg.secret_key
+        frac_conn["key_configured"] = bool(_frac_key)
+        frac_conn["secret_configured"] = bool(_frac_sec)
+
+        if not _frac_key or not _frac_sec:
+            frac_conn["error"] = "credentials not configured" + (
+                " (key missing)" if not _frac_key else " (secret missing)"
+            )
+        else:
+            _frac_acct = get_frac_client().get_account()
+            frac_conn = {
+                "ok": True,
+                "key_configured": True,
+                "secret_configured": True,
+                "account_status": _frac_acct.get("status"),
+                "trading_blocked": _frac_acct.get("trading_blocked", False),
+                "buying_power": _frac_acct.get("buying_power"),
+                "equity": _frac_acct.get("equity"),
+            }
+    except Exception as _exc:
+        frac_conn["ok"] = False
+        frac_conn["error"] = _safe_conn_error("Frac", _exc)
+    context["frac_connection"] = frac_conn
+
+    # Probe the primary (orders) Alpaca connection.
+    orders_conn: dict[str, Any] = {"ok": False, "error": "not checked"}
+    try:
+        from backend.alpaca import get_client
+        from backend.config import get_settings as _gcfg2
+
+        _ocfg = _gcfg2().alpaca
+        _ord_key = get_setting("alpaca_key_id", "") or _ocfg.key_id
+        _ord_sec = get_setting("alpaca_secret_key", "") or _ocfg.secret_key
+        orders_conn["key_configured"] = bool(_ord_key)
+        orders_conn["secret_configured"] = bool(_ord_sec)
+
+        if not _ord_key or not _ord_sec:
+            orders_conn["error"] = "credentials not configured" + (
+                " (key missing)" if not _ord_key else " (secret missing)"
+            )
+        else:
+            _ord_acct = get_client().get_account()
+            orders_conn = {
+                "ok": True,
+                "key_configured": True,
+                "secret_configured": True,
+                "account_status": _ord_acct.get("status"),
+                "trading_blocked": _ord_acct.get("trading_blocked", False),
+                "buying_power": _ord_acct.get("buying_power"),
+                "equity": _ord_acct.get("equity"),
+            }
+    except Exception as _exc:
+        orders_conn["ok"] = False
+        orders_conn["error"] = _safe_conn_error("Orders", _exc)
+    context["orders_connection"] = orders_conn
+
     metrics = _combined_metrics(
-        window_label, report_eco, report_feco, signals, report_top_bracket, report_top_frac
+        window_label,
+        report_eco,
+        report_feco,
+        signals,
+        report_top_bracket,
+        report_top_frac,
+        window_eco=window_eco if mode == "orders" else None,
+        window_frac_eco=window_eco if mode == "frac" else None,
     )
 
     # ── Multi-day reports: bucketed breakdowns for trend/streak analysis ──────
@@ -838,6 +1026,8 @@ def _run_report(
         frac_today=window_frac if mode == "frac" else None,
         frac_eco=feco if mode == "frac" else None,
         window_label=window_label,
+        window_eco=window_eco if mode == "orders" else None,
+        window_frac_eco=window_eco if mode == "frac" else None,
     )
 
     is_range = period in _RANGE_PERIODS
@@ -851,6 +1041,35 @@ def _run_report(
         report_type=report_type,
         model_setting_key="llm_model_range" if is_range else None,
     )
+
+    # Append connection status lines (orders + frac) so they always appear
+    # regardless of LLM output — surfaces silent credential/connectivity failures.
+    def _alpaca_status_line(label: str, conn: dict) -> str:
+        if conn.get("ok"):
+            _bp = conn.get("buying_power")
+            _eq = conn.get("equity")
+            _blocked = conn.get("trading_blocked")
+            _st = conn.get("account_status", "")
+            return (
+                f"🔗 {label}: OK · {_st}"
+                + (f" · equity ${_eq}" if _eq is not None else "")
+                + (f" · buying power ${_bp}" if _bp is not None else "")
+                + (" · ⚠️ trading blocked" if _blocked else "")
+            )
+        _key_ok = conn.get("key_configured")
+        _sec_ok = conn.get("secret_configured")
+        if _key_ok is False or _sec_ok is False:
+            _det = ("key ✗" if not _key_ok else "") + (" secret ✗" if not _sec_ok else "")
+            return f"🔴 {label}: credentials not set ({_det.strip()})"
+        return f"🔴 {label} FAILED: {conn.get('error', 'unknown error')}"
+
+    _status_block = (
+        _alpaca_status_line("Orders", orders_conn)
+        + "\n"
+        + _alpaca_status_line("Frac", frac_conn)
+    )
+    notification_body = notification_body + "\n\n" + _status_block
+    full_body = full_body + "\n\n" + _status_block
 
     results: dict[str, Any] = {}
     if notify:
@@ -1451,3 +1670,34 @@ async def review_report_comparison(request: ReportCompareRequest) -> dict[str, A
         _log.warning("could not persist report compare review", exc_info=True)
 
     return result
+
+
+# --------------------------------------------------------------------------- #
+# Consolidated economics snapshot — all-time P&L for both accounts combined.   #
+# --------------------------------------------------------------------------- #
+@router.get("/reports/economics")
+def reports_economics() -> dict[str, Any]:
+    """Return all-time realized P&L economics for both trading flows.
+
+    Combines ``get_order_economics_all_time`` (bracket paper orders) and
+    ``get_frac_economics_all_time`` (fractional positions) into a single
+    snapshot used by the Earnings tab in the frontend.
+    """
+    ord_eco = get_order_economics_all_time()
+    frac_eco = get_frac_economics_all_time()
+    combined_closed = (ord_eco.get("closed_trades") or 0) + (frac_eco.get("closed_trades") or 0)
+    combined_wins = (ord_eco.get("wins") or 0) + (frac_eco.get("wins") or 0)
+    combined_pnl = (ord_eco.get("total_pnl") or 0) + (frac_eco.get("total_pnl") or 0)
+    return {
+        "orders": ord_eco,
+        "frac": frac_eco,
+        "combined": {
+            "closed_trades": combined_closed,
+            "wins": combined_wins,
+            "losses": (ord_eco.get("losses") or 0) + (frac_eco.get("losses") or 0),
+            "total_pnl": round(combined_pnl, 2),
+            "win_pnl": round((ord_eco.get("win_pnl") or 0) + (frac_eco.get("win_pnl") or 0), 2),
+            "loss_pnl": round((ord_eco.get("loss_pnl") or 0) + (frac_eco.get("loss_pnl") or 0), 2),
+            "win_rate": combined_wins / combined_closed * 100 if combined_closed else None,
+        },
+    }

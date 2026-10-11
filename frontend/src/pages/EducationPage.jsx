@@ -7,13 +7,14 @@ const GLOSSARY_CATEGORIES = [
     icon: '📡',
     terms: [
       ['Confidence',                   '0–100 score combining AI confidence and rule-based evidence. Higher = stronger agreement across sources.'],
-      ['Confidence Floor',             'The minimum confidence score a signal must reach before it is stored, alerted, or paper traded. Setting it high reduces noisy, low-conviction signals; setting it low lets more signals through. Clearing the floor is necessary but not sufficient for an alert — see Alert deduplication.'],
+      ['Confidence Floor',             'The minimum confidence score a signal must reach before it is stored, alerted, or paper traded. Setting it high reduces noisy, low-conviction signals; setting it low lets more signals through. Clearing the floor is necessary but not sufficient for an alert — see Alert deduplication. Per-direction floors (Long / Short Confidence Floor) can add a stricter check on top; 0 means "inherit the general floor".'],
       ['Confidence Score',             'A number from 0 to 100 that reflects how strongly the AI and the technical indicators agree on a trade direction. Think of it like a jury vote — the closer to 100, the more votes in favour.'],
       ['Discovery / Trending Discovery', "An automatic process that scans the market for trending tickers you haven't added to your watchlist yet — like a search engine for trading opportunities. Results appear in the Discovery tab."],
       ['Risk Level',                   "A label (low / medium / high) that summarises how risky a trade idea is, based on how wildly the stock's price tends to swing and how large the proposed position would be."],
       ['Scan Interval',                'How often (in minutes) the app automatically re-checks every ticker on your watchlist. A shorter interval means more frequent checks — and more AI tokens used.'],
       ['Trend',                        'Sustained directional movement. Uptrend: higher highs and higher lows. Downtrend: lower highs and lower lows. Sideways: neither.'],
       ['Volume spike',                 'Unusually high volume (> 1.5× average). Often triggered by news, earnings surprises, or institutional order flow.'],
+      ['Watchlist hygiene',            'The practice of removing tickers that only generate untradable drop events (not shortable, not fractionable, or not tradable on Alpaca) and never produce actionable signals. MarketSage runs an automatic purge every Monday and provides a manual purge tool in Settings → Autonomous → 🧹 Watchlist Hygiene.'],
     ],
   },
   {
@@ -49,9 +50,13 @@ const GLOSSARY_CATEGORIES = [
     label: 'Paper Trading & Orders',
     icon: '🧾',
     terms: [
+      ['EoD close window',             'The number of minutes before market close during which no new positions are opened. Set via EOD_CLOSE_WINDOW_MINUTES (default 15). Raises to give you an earlier exit buffer near the bell.'],
       ['Filled Average Price',         'If your order was filled in multiple smaller batches at slightly different prices, this is the weighted average of what you actually paid or received. Think of it like splitting a restaurant bill across two cards and averaging the totals.'],
+      ['Long Confidence Floor',        'A per-direction confidence floor for long signals that applies on top of the general floor. 0 means "inherit the general Confidence Floor". Useful when longs and shorts need different conviction thresholds.'],
       ['Partially Filled',             "You asked to buy 10 shares, but only 6 went through so far. The other 4 are still waiting. This happens when there aren't enough sellers at your price right at that moment."],
       ['Realised P&L',                 'The money you actually made or lost once you closed a position. While you still hold shares, any gain or loss is "unrealised" — on paper only. Once you sell, it becomes realised: real cash.'],
+      ['Short Confidence Floor',       'A per-direction confidence floor for short signals (bracket only — fractional is long-only). 0 = inherit the general floor. Raise it if short signals frequently drop as untradable.'],
+      ['Trading days',                 'The set of weekdays on which the scanner is active, controlled by TRADING_DAYS (comma-separated 0=Mon…6=Sun). Removing a day pauses scanning without restarting the app.'],
     ],
   },
   {
@@ -60,6 +65,7 @@ const GLOSSARY_CATEGORIES = [
     icon: '🌍',
     terms: [
       ['CAPE / Shiller P/E',           '10-year inflation-adjusted P/E ratio for the S&P 500 as a whole. Values above 30 indicate elevated market-wide valuation; below 15 is historically cheap. Used in the macro regime filter (Rule 6).'],
+      ['PE_OVERBOUGHT / PE_OVERSOLD',  'Configurable P/E thresholds for the valuation extreme rule. A stock with TTM P/E above PE_OVERBOUGHT (default 60) raises a low-confidence short; a positive P/E below PE_OVERSOLD (default 8) raises a low-confidence long. Both are runtime-mutable in Settings → Autonomous.'],
       ['CPI',                          'Consumer Price Index — measures the rate of consumer price inflation. The Fed targets 2% YoY. High CPI forces the Fed to keep rates elevated, which compresses equity valuation multiples. Shown in the Macro card.'],
       ['Debt-to-Equity (D/E)',         "Total debt divided by stockholders' equity. Measures financial leverage. High D/E amplifies both gains and losses in downturns. A D/E above 3 is considered highly leveraged; context varies by sector (utilities and banks naturally carry more debt)."],
       ['Fed Funds Rate',               "The US Federal Reserve's benchmark overnight lending rate. Higher rates raise borrowing costs across the economy and compress equity valuation multiples by making bonds relatively more attractive."],
@@ -153,19 +159,27 @@ function EduSection({ id, title, badge, children, defaultOpen = false }) {
 }
 
 const EDU_SECTIONS = [
-  { id: 'edu-pipeline',      label: 'Pipeline' },
-  { id: 'edu-indicators',    label: 'Indicators' },
-  { id: 'edu-fundamentals',  label: 'Fundamentals' },
-  { id: 'edu-rules',         label: 'Rules' },
-  { id: 'edu-signals',       label: 'How scores work' },
-  { id: 'edu-backtesting',   label: 'Backtesting' },
-  { id: 'edu-paper-trading', label: 'Paper Trading' },
-  { id: 'edu-fractional',    label: 'Fractional' },
-  { id: 'edu-reports',       label: 'Reports' },
-  { id: 'edu-schedule',      label: 'Schedule' },
-  { id: 'edu-discovery',     label: 'Discovery' },
-  { id: 'edu-glossary',      label: 'Glossary' },
-  { id: 'edu-further',       label: 'Further reading' },
+  { group: 'Analysis', items: [
+    { id: 'edu-pipeline',     label: 'Pipeline' },
+    { id: 'edu-indicators',   label: 'Indicators' },
+    { id: 'edu-fundamentals', label: 'Fundamentals' },
+    { id: 'edu-rules',        label: 'Rules' },
+    { id: 'edu-signals',      label: 'How scores work' },
+  ]},
+  { group: 'Trading', items: [
+    { id: 'edu-paper-trading', label: 'Paper Trading' },
+    { id: 'edu-fractional',    label: 'Fractional' },
+    { id: 'edu-backtesting',   label: 'Backtesting' },
+  ]},
+  { group: 'Automation & Reports', items: [
+    { id: 'edu-reports',   label: 'Reports' },
+    { id: 'edu-schedule',  label: 'Schedule' },
+    { id: 'edu-discovery', label: 'Discovery' },
+  ]},
+  { group: 'Reference', items: [
+    { id: 'edu-glossary', label: 'Glossary' },
+    { id: 'edu-further',  label: 'Further reading' },
+  ]},
 ]
 
 export default function EducationPage() {
@@ -181,10 +195,15 @@ export default function EducationPage() {
       {/* ── Sticky TOC sidebar ─────────────────────────────────────────────── */}
       <nav className="edu-toc">
         <div className="edu-toc-title">Contents</div>
-        {EDU_SECTIONS.map(s => (
-          <button key={s.id} className="edu-toc-link" onClick={() => scrollTo(s.id)}>
-            {s.label}
-          </button>
+        {EDU_SECTIONS.map(g => (
+          <div key={g.group} className="edu-toc-group">
+            <div className="edu-toc-group-label">{g.group}</div>
+            {g.items.map(s => (
+              <button key={s.id} className="edu-toc-link" onClick={() => scrollTo(s.id)}>
+                {s.label}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
 
@@ -291,8 +310,8 @@ export default function EducationPage() {
               <li><span className="lvl-red">&gt; 70</span> — Overbought. Price rose quickly; may pull back.</li>
             </ul>
             <p className="edu-ind-check">
-              <strong>What this system checks:</strong> RSI extreme (&lt;30 or &gt;70) on
-              2 or more of the three timeframes simultaneously.
+              <strong>What this system checks:</strong> RSI extreme (&lt;<code>RSI_OVERSOLD</code> or &gt;<code>RSI_OVERBOUGHT</code>, defaults 30/70) on
+              2 or more of the three timeframes simultaneously. Thresholds are set in <code>.env</code> (require a restart).
             </p>
           </div>
 
@@ -580,8 +599,8 @@ export default function EducationPage() {
             {
               num: 5, icon: '💰', title: 'Valuation extreme (P/E)',
               side: 'both', conf: '40–42',
-              trigger: 'TTM P/E > 60 (short) or 0 < P/E < 8 (long)',
-              body: <><strong>P/E &gt; 60×</strong> → low-confidence short ("severely overvalued"). <strong>P/E &lt; 8×</strong> (positive) → low-confidence long ("deeply discounted"). Confidence intentionally low — reinforces but never drives a signal. Negative P/E (loss-making) is skipped.</>,
+              trigger: 'TTM P/E > PE_OVERBOUGHT (default 60) or 0 < P/E < PE_OVERSOLD (default 8)',
+              body: <><strong>P/E &gt; <code>PE_OVERBOUGHT</code></strong> (default 60) → low-confidence short ("severely overvalued"). <strong>0 &lt; P/E &lt; <code>PE_OVERSOLD</code></strong> (default 8) → low-confidence long ("deeply discounted"). Confidence intentionally low — reinforces but never drives a signal. Negative P/E (loss-making) is skipped. Both thresholds are configurable at runtime in <strong>Settings → Autonomous</strong>.</>,
             },
             {
               num: 6, icon: '🌍', title: 'Macro regime filter',
@@ -960,6 +979,24 @@ export default function EducationPage() {
           </tbody>
         </table>
 
+        <h4 className="edu-sub-heading">Ticker Ledger</h4>
+        <p className="section-desc">
+          The <strong>Ticker Ledger</strong> (below the orders table) groups all closed trades by
+          ticker into a balance-sheet view. The summary row shows Ticker, Trades, Invested, Wins,
+          Losses, Total P&amp;L and Last closed. Click any row to expand a per-trade history, oldest
+          first, with one row per event: <strong>📡 Signal scan</strong> (the signal that preceded
+          the order, with its type and confidence), <strong>▲ LONG / ▼ SHORT Placed</strong> (entry
+          price, notional, shares, stop), <strong>✓ Filled</strong> (fill price) and{' '}
+          <strong>⏹ Closed</strong> or <strong>↩ Cashout</strong> (exit price and realised
+          P&amp;L — a manual cashout is shown as the close of the order it exited).
+        </p>
+        <p className="section-desc">
+          The Fractional tab has its own <strong>Fractional — Ticker Ledger</strong> with the same
+          summary columns. Each position shows <strong>▲ Opened</strong> followed by its exit —{' '}
+          ✅ Target, 🛑 Stop, 🌙 EoD or 🔄 Reconciled — or <strong>⏳ Holding</strong> while it is
+          still open.
+        </p>
+
         <h4 className="edu-sub-heading">Settings</h4>
         <table className="edu-macro-table">
           <thead><tr><th>Setting</th><th>Default</th><th>What it controls</th></tr></thead>
@@ -967,9 +1004,18 @@ export default function EducationPage() {
             <tr><td>Paper trading enabled</td><td>off</td><td>Master toggle — turns off auto order placement while keeping the data panel active</td></tr>
             <tr><td>Position size per trade</td><td>$500</td><td>Target $ per bracket order. Actual cost = <code>floor(size/price) × price</code></td></tr>
             <tr><td>Min confidence to trade</td><td>signal floor</td><td>Override the global confidence floor specifically for auto-trading</td></tr>
+            <tr><td>Long confidence floor</td><td>0 (inherit)</td><td>Per-direction floor for long signals (frac + bracket). 0 = use the global confidence floor. Raise to require stronger conviction for longs.</td></tr>
+            <tr><td>Short confidence floor</td><td>0 (inherit)</td><td>Per-direction floor for short signals (bracket only). 0 = use the global floor. Raise if shorts mostly drop as untradable.</td></tr>
+            <tr><td>Active trading days</td><td>Mon–Fri</td><td>Comma-separated day indices (0=Mon…6=Sun). Remove a day to pause scanning without restarting.</td></tr>
+            <tr><td>EoD close window</td><td>15 min</td><td>Minutes before market close during which no new positions are opened. Raise to exit earlier near the close.</td></tr>
             <tr><td>Alpaca Paper API URL</td><td>https://paper-api.alpaca.markets/v2</td><td>Must include <code>/v2</code> — without it the account endpoint returns empty data</td></tr>
           </tbody>
         </table>
+        <p className="section-desc">
+          <strong>Fees:</strong> Alpaca paper accounts charge $0 commission. The Closed Orders
+          section shows a <code>Fees: $0 ⓘ</code> label for transparency; all P&amp;L figures are
+          already net of fees.
+        </p>
 
         <h4 className="edu-sub-heading">Getting started</h4>
         <ol className="edu-steps">
@@ -979,6 +1025,17 @@ export default function EducationPage() {
           <li>Enable the <strong>Paper trading enabled</strong> toggle and set your position size.</li>
           <li>Wait for the next scheduled scan, trigger one manually, or click <strong>📈 Place Paper Order</strong> on any signal card — orders appear on the <strong>Trading</strong> page.</li>
         </ol>
+
+        <h4 className="edu-sub-heading">Earnings tab</h4>
+        <p className="section-desc">
+          The <strong>Earnings</strong> tab (third tab in the Trading page) brings both trading
+          flows together. <em>Today</em> shows Day P&amp;L tiles for Orders, Frac and Combined, plus
+          account equity. <em>All-time</em> shows a block per flow and a Combined block: Realised
+          P&amp;L, Closed trades, Win rate (with W/L counts), Gross wins, Gross losses, and open
+          positions with notional at risk. Each block has a <strong>Show charts</strong> toggle
+          that reveals a Win/Loss pie and a P&amp;L breakdown bar (avg win, avg loss, gross win,
+          gross loss, net).
+        </p>
 
         <div className="edu-callout">
           <strong>Free tier is sufficient.</strong> Alpaca's free paper-trading account gives
@@ -1061,6 +1118,11 @@ export default function EducationPage() {
             <tr><td>Weekly Fractional</td><td>7 days</td><td>Fractional trades + cross-week patterns</td></tr>
           </tbody>
         </table>
+        <p className="section-desc">
+          All-time economics across both flows are not a fifth report — they live on the{' '}
+          <strong>Earnings</strong> tab of the Trading page, backed by{' '}
+          <code>GET /reports/economics</code>.
+        </p>
 
         <h4 className="edu-sub-heading">Compute, then narrate</h4>
         <p className="section-desc">
@@ -1090,6 +1152,14 @@ export default function EducationPage() {
           is 10 points — on the reasoning that 62% → 80% is new information while 62% → 65% is not.
         </p>
 
+        <h4 className="edu-sub-heading">Period and all-time P&amp;L in every report</h4>
+        <p className="section-desc">
+          Every EoD and weekly report notification carries a one-line P&amp;L summary —{' '}
+          <em>Period P&amp;L · All-time · Win rate · closed trades</em> — for that trading flow.
+          The period figure comes first (today for EoD, the last 7 days for weekly), so you can
+          judge the window and the running total without opening the app.
+        </p>
+
         <h4 className="edu-sub-heading">Reading the tags</h4>
         <p className="section-desc">
           Every notification starts with its mode and category, so the first thing you read tells
@@ -1097,14 +1167,28 @@ export default function EducationPage() {
           <code>[Order/Frac] [Signal]</code>, <code>[Order] [Blocked]</code>. A short signal is
           tagged <code>[Order]</code> only, since fractional shorts don't exist.
         </p>
+
+        <h4 className="edu-sub-heading">Alpaca connection status in EOD & weekly reports</h4>
+        <p className="section-desc">
+          Every end-of-day and weekly report notification ends with a short Alpaca connection
+          status block. It shows whether the primary (Orders) and fractional (Frac) Alpaca
+          profiles are reachable at report time, with account equity on success or the error
+          reason on failure. This makes it easy to catch a broken key without checking the
+          Settings page separately.
+        </p>
       </EduSection>
 
       {/* Section 11 — The trading day */}
       <EduSection id="edu-schedule" title="The trading day" badge="Schedule">
         <p className="section-desc">
-          The <strong>Schedule</strong> tab draws the whole week as a timeline — when the machine
-          wakes, when scans fire, when reports go out — so you can see the rhythm without reading
-          cron expressions.
+          The <strong>Schedule</strong> tab draws the trading week as a timetable: a single time
+          column on the left and one column per weekday, so every time slot is one row across
+          Monday to Friday. It shows system wake, the watchlist purge (Monday only), market open,
+          every signal scan, every discovery run, market close, the EoD report, the End-of-Week
+          report (Friday only) and system stop. When a scan and a discovery run fall in the same
+          minute, they share one cell. The scan cadence and discovery interval are read live from
+          Settings, so changing them redraws the table. A red line marks the current time; hover
+          a time to see its UTC equivalent.
         </p>
 
         <h4 className="edu-sub-heading">Two schedulers, not one</h4>
@@ -1132,6 +1216,17 @@ export default function EducationPage() {
           Running on a schedule rather than continuously is also what keeps hosting near-free:
           the server is only billed while it's awake, which for a market-hours tool is roughly a
           third of the day.
+        </p>
+
+        <h4 className="edu-sub-heading">Monday watchlist purge</h4>
+        <p className="section-desc">
+          Every Monday, at the start of the first scheduler loop, the system automatically removes
+          tickers that have accumulated only untradable drop events (typically not shortable, not
+          fractionable, or blocked by Alpaca's tradability check) with zero actionable signals over
+          the past 7 days. These tickers waste scan cycles without ever producing an order.
+          The purge is logged in the Activity feed and can also be triggered manually from{' '}
+          <strong>Settings → Autonomous → 🧹 Watchlist Hygiene</strong>, where you can preview
+          which tickers would be removed before committing.
         </p>
       </EduSection>
 

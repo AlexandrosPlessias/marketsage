@@ -122,12 +122,15 @@ Based on the TTM (trailing twelve months) P/E ratio from fundamentals.
 
 | Condition | Direction | Confidence |
 |---|---|---|
-| P/E > 60 (severely overvalued) | Short | 40 |
-| P/E < 8 (deeply discounted, must be positive) | Long | 42 |
+| P/E > `PE_OVERBOUGHT` (default 60) — severely overvalued | Short | 40 |
+| 0 < P/E < `PE_OVERSOLD` (default 8) — deeply discounted | Long | 42 |
 | Negative P/E (loss-making) | — | skipped |
 
 Confidence is **intentionally low (40–42)** so this rule never fires a signal alone —
 it only reinforces an existing signal from another source after merging.
+
+`PE_OVERBOUGHT` and `PE_OVERSOLD` are runtime-mutable from **Settings → Autonomous** (no restart needed).
+`PE_OVERSOLD` must always be less than `PE_OVERBOUGHT`.
 
 ### Rule 5 — Macro regime filter *(applied after merge)*
 
@@ -257,15 +260,20 @@ stored history and the alerts you receive stay in agreement. Full detail in
 
 ## Configurable thresholds
 
-All thresholds can be adjusted in `.env` (restart required) or viewed in `GET /health`:
+| Variable | Default | Mutable | Effect |
+|---|---|---|---|
+| `CONFIDENCE_FLOOR` | `65` | ✓ runtime | Signals below this are discarded |
+| `RSI_OVERSOLD` | `30` | ✗ restart | RSI ≤ this triggers the long rule |
+| `RSI_OVERBOUGHT` | `70` | ✗ restart | RSI ≥ this triggers the short rule |
+| `VOLUME_SPIKE_MULTIPLIER` | `2.0` | ✗ restart | Volume must be this × avg to qualify |
+| `SIGNIFICANT_MOVE_PCT` | `2.0` | ✗ restart | Day move must exceed this % for volume rule |
+| `PE_OVERBOUGHT` | `60` | ✓ runtime | TTM P/E above this triggers the valuation short rule |
+| `PE_OVERSOLD` | `8` | ✓ runtime | Positive TTM P/E below this triggers the valuation long rule |
+| `LONG_CONFIDENCE_FLOOR` | `0` | ✓ runtime | Per-direction floor for long signals; 0 = use `CONFIDENCE_FLOOR` |
+| `SHORT_CONFIDENCE_FLOOR` | `0` | ✓ runtime | Per-direction floor for short signals; 0 = use `CONFIDENCE_FLOOR` |
 
-| Variable | Default | Effect |
-|---|---|---|
-| `CONFIDENCE_FLOOR` | `65` | Signals below this are discarded |
-| `RSI_OVERSOLD` | `30` | RSI ≤ this triggers the long rule |
-| `RSI_OVERBOUGHT` | `70` | RSI ≥ this triggers the short rule |
-| `VOLUME_SPIKE_MULTIPLIER` | `2.0` | Volume must be this × avg to qualify |
-| `SIGNIFICANT_MOVE_PCT` | `2.0` | Day move must exceed this % for volume rule |
+Runtime-mutable settings take effect immediately via **Settings → Autonomous** — no restart needed.
+RSI and volume thresholds require `.env` edit + `make up`.
 
 ---
 

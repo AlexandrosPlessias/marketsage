@@ -542,6 +542,22 @@ years). `mode` is `orders` or `frac`. The report is saved as `{period}_{mode}` (
 Returns the same shape as the fixed-period endpoints plus `window`. `422` on invalid
 input.
 
+### `GET /reports/economics`
+
+All-time economics across both trading flows — a SQL aggregate, no LLM call, nothing
+dispatched. Powers the Trading page **Earnings** tab.
+
+```json
+{
+  "orders":   { "closed_trades": 42, "wins": 25, "losses": 17, "total_pnl": 312.4,
+                "win_pnl": 820.1, "loss_pnl": -507.7, "win_rate": 59.5,
+                "open_positions": 3, "notional_open": 1500.0 },
+  "frac":     { "...": "same keys as orders" },
+  "combined": { "closed_trades": 60, "wins": 34, "losses": 26, "total_pnl": 355.2,
+                "win_pnl": 910.3, "loss_pnl": -555.1, "win_rate": 56.7 }
+}
+```
+
 ### `GET /reports/compare?a=&b=`
 
 Deterministic diff of two reports of the same type — no LLM call. The earlier report is

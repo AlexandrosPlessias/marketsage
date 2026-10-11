@@ -11,12 +11,34 @@ const NAV_PRIMARY = [
   { view: 'education', label: 'Learn',     icon: '📚' },
   { view: 'schedule',  label: 'Schedule',  icon: '🗓' },
 ]
+// Logs (Aspire) and Portainer only exist on the local Docker stack.
+const IS_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+
 const NAV_SECONDARY = [
   { view: 'backtest', label: 'Backtesting', icon: '🧪' },
   { view: 'settings', label: 'Settings',    icon: '⚙' },
 ]
 
-export default function Header({ health, usage, btTodayTokens = 0, activeView, onViewChange, clock }) {
+// state: ok | idle | warn | err → dot colour; info chips (no state) show an icon instead.
+// Colour is reserved for warn/err so a healthy bar reads as quiet.
+function StatusChip({ state, icon, label, detail, title, onClick }) {
+  const Tag = onClick ? 'button' : 'span'
+  return (
+    <Tag
+      type={onClick ? 'button' : undefined}
+      className={`live-chip status-chip status-chip-${state ?? 'info'}`}
+      title={title}
+      onClick={onClick}
+    >
+      {state && <span className="status-dot" aria-hidden="true" />}
+      {icon && <span aria-hidden="true">{icon}</span>}
+      <span>{label}</span>
+      {detail && <span className="status-chip-detail">· {detail}</span>}
+    </Tag>
+  )
+}
+
+export default function Header({ health, usage, btTodayTokens = 0, activeView, onViewChange, onOpenSettings, clock }) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   const navigate = (view) => { onViewChange(view); setMenuOpen(false) }
@@ -91,8 +113,8 @@ export default function Header({ health, usage, btTodayTokens = 0, activeView, o
         <div className="header-right">
           <div className="header-tools">
             <button className={`nav-tab ${activeView === 'backtest' ? 'active' : ''}`} onClick={() => onViewChange('backtest')} style={{ fontSize: 12 }}>Backtesting</button>
-            <a href="http://localhost:18889" target="_blank" rel="noreferrer" className="tool-btn" title="Aspire — traces & logs">Logs</a>
-            <a href="http://localhost:9000"  target="_blank" rel="noreferrer" className="tool-btn" title="Portainer — container management">Portainer</a>
+            {IS_LOCAL && <a href="http://localhost:18889" target="_blank" rel="noreferrer" className="tool-btn" title="Aspire — traces & logs">Logs</a>}
+            {IS_LOCAL && <a href="http://localhost:9000"  target="_blank" rel="noreferrer" className="tool-btn" title="Portainer — container management">Portainer</a>}
             <button
               className={`tool-btn ${activeView === 'settings' ? 'tool-btn-active' : ''}`}
               onClick={() => onViewChange('settings')}
@@ -152,148 +174,143 @@ export default function Header({ health, usage, btTodayTokens = 0, activeView, o
               </button>
             ))}
 
-            <div className="mobile-menu-divider" />
-            <div className="mobile-menu-section-label">External</div>
-            <a href="http://localhost:18889" target="_blank" rel="noreferrer" className="mobile-menu-item" onClick={() => setMenuOpen(false)}>
-              <span className="mobile-menu-icon">📋</span>Logs
-            </a>
-            <a href="http://localhost:9000" target="_blank" rel="noreferrer" className="mobile-menu-item" onClick={() => setMenuOpen(false)}>
-              <span className="mobile-menu-icon">🐳</span>Portainer
-            </a>
+            {IS_LOCAL && (
+              <>
+                <div className="mobile-menu-divider" />
+                <div className="mobile-menu-section-label">External</div>
+                <a href="http://localhost:18889" target="_blank" rel="noreferrer" className="mobile-menu-item" onClick={() => setMenuOpen(false)}>
+                  <span className="mobile-menu-icon">📋</span>Logs
+                </a>
+                <a href="http://localhost:9000" target="_blank" rel="noreferrer" className="mobile-menu-item" onClick={() => setMenuOpen(false)}>
+                  <span className="mobile-menu-icon">🐳</span>Portainer
+                </a>
+              </>
+            )}
 
           </nav>
         </div>
       )}
 
-      {/* ── Row 2: status bar ──────────────────────────────────────────────── */}
+      {/* ── Row 2: status bar — Market · Engine · AI ───────────────────────── */}
       <div className="header-statusbar">
         {!health && (
           <span className="live-chip live-chip-connecting">connecting…</span>
         )}
 
-        {/* 1. System health ──────────────────────────────────────────── */}
-        {health && (
-          <span
-            className={`live-chip live-chip-api ${ok ? 'live-chip-api-ok' : 'live-chip-api-err'}`}
-            title={ok ? 'Backend services are healthy' : 'Backend service error — check logs'}
-          >
-            {ok ? '✅' : '🔴'} System
-          </span>
-        )}
-
-        {/* 2. US Market ─────────────────────────────────────────────── */}
-        {health && (
-          <span
-            className={`live-chip ${open ? 'live-chip-market-open' : 'live-chip-market-closed'}`}
-            title={open
-              ? (closeIn ? `Closes in ${closeIn}` : 'US equity market is currently open')
-              : (openIn  ? `Opens in ${openIn}`   : 'US equity market is currently closed')}
-          >
-            {open ? '🟢' : '🔴'} US Market {open ? 'Open' : 'Closed'}
-            {open  && closeIn && <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 5 }}>· closes in {closeIn}</span>}
-            {!open && openIn  && <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 5 }}>· opens in {openIn}</span>}
-          </span>
-        )}
-
-        {/* 3. Scanner ───────────────────────────────────────────────── */}
         {health && (() => {
-          const sched    = health.scheduler ?? {}
+          const sched = health.scheduler ?? {}
+          const at    = health.autotrade ?? {}
+          const hhmm  = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
+
+          // Engine
           const running  = sched.running ?? false
-          const lastRun  = sched.last_run ? new Date(sched.last_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
-          const nextRun  = sched.next_run ? new Date(sched.next_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
+          const lastRun  = hhmm(sched.last_run)
+          const nextRun  = hhmm(sched.next_run)
           const interval = sched.scan_interval_minutes ?? null
-          const title    = [
-            running ? 'Signal scanner active' : 'Signal scanner stopped',
-            interval ? `Interval: ${interval} min` : null,
-            lastRun  ? `Last scan: ${lastRun}` : null,
-            nextRun  ? `Next scan: ${nextRun}` : null,
-          ].filter(Boolean).join('\n')
+          const lastDisc = hhmm(sched.last_discovery)
+          const nextDisc = hhmm(sched.next_discovery)
+          const discOn   = !!(sched.next_discovery || sched.last_discovery)
+          const paper    = at.paper ?? false
+          const frac     = at.frac ?? false
+          const fracLive = frac && at.frac_mode === 'live'
+          const autoParts = [paper && 'Bracket', frac && (fracLive ? 'Frac LIVE' : 'Frac')].filter(Boolean)
+
           return (
-            <span className={`live-chip ${running ? 'live-chip-market-open' : 'live-chip-market-closed'}`} title={title}>
-              🤖 Scanner: {running ? 'Active' : 'Off'}
-              {running && nextRun && <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 5 }}>· next {nextRun}</span>}
-            </span>
+            <>
+              {/* ── Market ── */}
+              <div className="statusbar-group">
+                <StatusChip
+                  state={ok ? 'ok' : 'err'}
+                  label="System"
+                  title={ok ? 'Backend services are healthy' : 'Backend service error — check logs'}
+                />
+                <StatusChip
+                  state={open ? 'ok' : 'idle'}
+                  label={open ? 'Market open' : 'Market closed'}
+                  detail={open ? closeIn : openIn}
+                  title={open
+                    ? (closeIn ? `US market open — closes in ${closeIn}` : 'US equity market is open')
+                    : (openIn  ? `US market closed — opens in ${openIn}` : 'US equity market is closed')}
+                  onClick={() => onViewChange('schedule')}
+                />
+              </div>
+
+              <span className="statusbar-sep" aria-hidden="true">|</span>
+
+              {/* ── Engine ── */}
+              <div className="statusbar-group">
+                <StatusChip
+                  state={running ? 'ok' : (open ? 'err' : 'idle')}
+                  icon="📡"
+                  label={running ? 'Scanner' : 'Scanner off'}
+                  detail={running && nextRun ? `next ${nextRun}` : null}
+                  title={[
+                    running ? 'Signal scanner active' : 'Signal scanner stopped',
+                    interval ? `Interval: ${interval} min` : null,
+                    lastRun ? `Last scan: ${lastRun}` : null,
+                    nextRun ? `Next scan: ${nextRun}` : null,
+                  ].filter(Boolean).join('\n')}
+                  onClick={() => onViewChange('schedule')}
+                />
+                <StatusChip
+                  state={fracLive ? 'warn' : (autoParts.length ? 'ok' : 'idle')}
+                  icon="🤖"
+                  label={autoParts.length ? `Auto: ${autoParts.join(' + ')}` : 'Auto off'}
+                  title={[
+                    'Autonomous trading',
+                    `Paper bracket auto-trade: ${paper ? 'on' : 'off'}`,
+                    `Fractional auto-trade: ${frac ? `on (${at.frac_mode})` : 'off'}`,
+                    fracLive ? '⚠ Fractional is trading REAL money' : null,
+                  ].filter(Boolean).join('\n')}
+                  onClick={() => onOpenSettings?.('settings-autotrade')}
+                />
+                <StatusChip
+                  state={discOn ? 'ok' : 'idle'}
+                  icon="🔥"
+                  label={discOn ? 'Discovery' : 'Discovery off'}
+                  detail={nextDisc ? `next ${nextDisc}` : (lastDisc ? `last ${lastDisc}` : null)}
+                  title={[
+                    discOn ? 'Trending discovery scheduled' : 'Discovery not scheduled',
+                    lastDisc ? `Last run: ${lastDisc}` : 'No run yet',
+                    nextDisc ? `Next run: ${nextDisc}` : null,
+                  ].filter(Boolean).join('\n')}
+                  onClick={() => onViewChange('trending')}
+                />
+                <StatusChip
+                  icon="📋"
+                  label={`${health.watchlist_size ?? 0} tickers`}
+                  title={`Watchlist: ${health.watchlist_size ?? 0} ticker(s) being monitored`}
+                  onClick={() => onViewChange('dashboard')}
+                />
+              </div>
+
+              {/* ── AI (right-aligned) ── */}
+              <div className="statusbar-group statusbar-group-end">
+                {modelLabel && (
+                  <StatusChip
+                    icon="🧠"
+                    label={modelLabel}
+                    title={`Active LLM: ${modelLabel}`}
+                    onClick={() => onOpenSettings?.('settings-ai-provider')}
+                  />
+                )}
+                {usage && (
+                  <StatusChip
+                    icon="⚡"
+                    label={`${fmtTokens(todayTokens)} tokens today`}
+                    title={[
+                      `Tokens today (${activeModel ? activeModel.split('/').pop() : 'all models'}): ${todayTokens.toLocaleString()}`,
+                      `  analysis: ${fmtTokens(modelTodayTokens)}  backtests: ${fmtTokens(btTodayTokens)}`,
+                      `All providers today: ${fmtTokens(todayEntry?.total_tokens ?? 0)}`,
+                      `All-time (${usage?.period_days ?? 30}d): ${fmtTokens(usage?.total_prompt_tokens ?? 0)} prompt + ${fmtTokens(usage?.total_completion_tokens ?? 0)} completion`,
+                    ].join('\n')}
+                    onClick={() => onOpenSettings?.('settings-usage')}
+                  />
+                )}
+              </div>
+            </>
           )
         })()}
-
-        {/* 3b. Autonomous trading ───────────────────────────────────── */}
-        {health && (() => {
-          const at = health.autotrade ?? {}
-          const paper = at.paper ?? false
-          const frac = at.frac ?? false
-          const fracLive = at.frac_mode === 'live'
-          const anyOn = paper || frac
-          const parts = []
-          if (paper) parts.push('Bracket')
-          if (frac) parts.push(fracLive ? 'Frac (LIVE)' : 'Frac')
-          const label = anyOn ? parts.join(' + ') : 'Off'
-          const title = [
-            'Autonomous trading',
-            `Paper bracket auto-trade: ${paper ? 'on' : 'off'}`,
-            `Fractional auto-trade: ${frac ? `on (${at.frac_mode})` : 'off'}`,
-          ].join('\n')
-          const cls = fracLive && frac
-            ? 'live-chip-api-err'
-            : (anyOn ? 'live-chip-market-open' : 'live-chip-market-closed')
-          return (
-            <span className={`live-chip ${cls}`} title={title}>
-              🤖 Auto: {label}
-            </span>
-          )
-        })()}
-
-        {/* 4. Discovery ─────────────────────────────────────────────── */}
-        {health && (() => {
-          const sched    = health.scheduler ?? {}
-          const lastDisc = sched.last_discovery ? new Date(sched.last_discovery).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
-          const nextDisc = sched.next_discovery ? new Date(sched.next_discovery).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
-          const title    = [
-            lastDisc ? `Last discovery: ${lastDisc}` : 'No discovery run yet',
-            nextDisc ? `Next discovery: ${nextDisc}` : null,
-          ].filter(Boolean).join('\n')
-          return (
-            <span className="live-chip live-chip-tokens" title={title}>
-              🔥 Discovery: {lastDisc ?? 'not run'}
-              {nextDisc && <span style={{ fontWeight: 400, opacity: 0.75, marginLeft: 5 }}>· next {nextDisc}</span>}
-            </span>
-          )
-        })()}
-
-        {/* 5. Watchlist ticker count ────────────────────────────────── */}
-        {health && (
-          <span className="live-chip live-chip-model"
-                title={`Watchlist: ${health.watchlist_size ?? 0} ticker(s) being monitored`}>
-            📋 {health.watchlist_size ?? 0} tickers
-          </span>
-        )}
-
-        {/* separator ───────────────────────────────────────────────── */}
-        {health && (
-          <span className="statusbar-sep" aria-hidden="true">|</span>
-        )}
-
-        {/* 6. LLM provider · model ──────────────────────────────────── */}
-        {health && modelLabel && (
-          <span className="live-chip live-chip-model" title={`Active LLM: ${modelLabel}`}>
-            🧠 {modelLabel}
-          </span>
-        )}
-
-        {/* 7. Token usage today ─────────────────────────────────────── */}
-        {health && usage && (
-          <span
-            className="live-chip live-chip-tokens"
-            title={[
-              `Tokens today (${activeModel ? activeModel.split('/').pop() : 'all models'}): ${todayTokens.toLocaleString()}`,
-              `  analysis: ${fmtTokens(modelTodayTokens)}  backtests: ${fmtTokens(btTodayTokens)}`,
-              `All providers today: ${fmtTokens(todayEntry?.total_tokens ?? 0)}`,
-              `All-time (${usage?.period_days ?? 30}d): ${fmtTokens(usage?.total_prompt_tokens ?? 0)} prompt + ${fmtTokens(usage?.total_completion_tokens ?? 0)} completion`,
-            ].join('\n')}
-          >
-            ⚡ {fmtTokens(todayTokens)} tok tod
-          </span>
-        )}
-
       </div>
 
     </header>

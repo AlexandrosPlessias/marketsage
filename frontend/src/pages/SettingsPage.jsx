@@ -1011,6 +1011,90 @@ function FloorNoEffectWarning({ value, signalFloor, zeroMeansDefault = false, hi
   )
 }
 
+function PurgeUntradableButton() {
+  const [preview,    setPreview]    = useState(null)   // null | []
+  const [purgeStatus, setPurgeStatus] = useState(null) // null | 'previewing' | 'purging' | 'done' | 'error'
+  const [purgeMsg,   setPurgeMsg]   = useState('')
+
+  const runPreview = async () => {
+    setPurgeStatus('previewing'); setPreview(null); setPurgeMsg('')
+    try {
+      const r = await fetch(`${API}/settings/watchlist/untradable-preview?days=7&min_drops=3`, { headers: getAuthHeaders() })
+      if (!r.ok) throw new Error(await r.text())
+      const d = await r.json()
+      setPreview(d.candidates)
+      if (d.candidates.length === 0) { setPurgeMsg('No persistently untradable tickers found in the last 7 days.'); setPurgeStatus('done') }
+      else setPurgeStatus('confirm')
+    } catch (e) { setPurgeMsg(e.message || 'Preview failed'); setPurgeStatus('error') }
+  }
+
+  const runPurge = async () => {
+    setPurgeStatus('purging')
+    try {
+      const r = await fetch(`${API}/settings/watchlist/purge-untradable?days=7&min_drops=3`, {
+        method: 'POST', headers: getAuthHeaders()
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const d = await r.json()
+      setPurgeMsg(d.count > 0 ? `✓ Removed ${d.count} ticker(s): ${d.removed.join(', ')}` : 'Nothing to remove.')
+      setPurgeStatus('done'); setPreview(null)
+      setTimeout(() => { setPurgeStatus(null); setPurgeMsg('') }, 6000)
+    } catch (e) { setPurgeMsg(e.message || 'Purge failed'); setPurgeStatus('error') }
+  }
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase',
+                    letterSpacing: '0.09em', marginBottom: 10 }}>🧹 Watchlist Hygiene</div>
+      <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+        <div className="settings-row-label">
+          <span>Purge untradable tickers</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>
+            Remove watchlist tickers that had ONLY untradable drops (no tradable signals) in the last 7 days.
+            Also runs automatically every Monday. Preview first to review before removing.
+          </span>
+          {purgeStatus === 'confirm' && preview && (
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontSize: 12, color: '#f59e0b' }}>
+                ⚠ Will remove {preview.length} ticker(s):
+              </span>
+              <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {preview.map(c => (
+                  <span key={c.ticker} style={{ fontSize: 12, background: 'var(--surface2)',
+                    padding: '2px 8px', borderRadius: 4 }}>
+                    {c.ticker} <span className="text-dim">({c.drop_count} drops)</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {purgeMsg && (
+            <span style={{ fontSize: 12, marginTop: 6, display: 'block',
+              color: purgeStatus === 'error' ? 'var(--red)' : purgeStatus === 'done' ? 'var(--green)' : '#f59e0b' }}>
+              {purgeMsg}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          {purgeStatus !== 'confirm' && (
+            <button className="btn-secondary btn-sm" onClick={runPreview}
+                    disabled={purgeStatus === 'previewing' || purgeStatus === 'purging'}>
+              {purgeStatus === 'previewing' ? 'Scanning…' : 'Preview'}
+            </button>
+          )}
+          {purgeStatus === 'confirm' && (
+            <>
+              <button className="btn-secondary btn-sm" onClick={() => { setPreview(null); setPurgeStatus(null) }}>Cancel</button>
+              <button className="btn-primary btn-sm" style={{ background: '#ef4444' }}
+                      onClick={runPurge} disabled={purgeStatus === 'purging'}>Remove</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AutonomousTradingSection() {
   const [fetchErr,   setFetchErr]   = useState(false)
   const [saveStatus, setSaveStatus] = useState(null)
@@ -1025,6 +1109,12 @@ function AutonomousTradingSection() {
   const [rsiOversold,           setRsiOversold]           = useState(30)
   const [rsiOverbought,         setRsiOverbought]         = useState(70)
   const [volumeSpikeMultiplier, setVolumeSpikeMultiplier] = useState(2)
+  const [longConfFloor,         setLongConfFloor]         = useState(0)
+  const [shortConfFloor,        setShortConfFloor]        = useState(0)
+  const [peOverbought,          setPeOverbought]          = useState(60)
+  const [peOversold,            setPeOversold]            = useState(8)
+  const [tradingDays,           setTradingDays]           = useState('0,1,2,3,4')
+  const [eodCloseWindow,        setEodCloseWindow]        = useState(15)
   const [envDefaults,           setEnvDefaults]           = useState(null)
 
   useEffect(() => {
@@ -1040,6 +1130,12 @@ function AutonomousTradingSection() {
         setRsiOversold(d.rsi_oversold ?? 30)
         setRsiOverbought(d.rsi_overbought ?? 70)
         setVolumeSpikeMultiplier(d.volume_spike_multiplier ?? 2)
+        setLongConfFloor(d.long_confidence_floor ?? 0)
+        setShortConfFloor(d.short_confidence_floor ?? 0)
+        setPeOverbought(d.pe_overbought ?? 60)
+        setPeOversold(d.pe_oversold ?? 8)
+        setTradingDays(d.trading_days ?? '0,1,2,3,4')
+        setEodCloseWindow(d.eod_close_window_minutes ?? 15)
         setEnvDefaults({
           confidence_floor: d.confidence_floor_env ?? 75,
           frac_min_confidence: d.frac_min_confidence_env ?? 85,
@@ -1050,6 +1146,12 @@ function AutonomousTradingSection() {
           rsi_oversold: d.rsi_oversold_env ?? 30,
           rsi_overbought: d.rsi_overbought_env ?? 70,
           volume_spike_multiplier: d.volume_spike_multiplier_env ?? 2,
+          long_confidence_floor: d.long_confidence_floor_env ?? 0,
+          short_confidence_floor: d.short_confidence_floor_env ?? 0,
+          pe_overbought: d.pe_overbought_env ?? 60,
+          pe_oversold: d.pe_oversold_env ?? 8,
+          trading_days: d.trading_days_env ?? '0,1,2,3,4',
+          eod_close_window_minutes: d.eod_close_window_minutes_env ?? 15,
         })
       })
       .catch(() => setFetchErr(true))
@@ -1066,9 +1168,23 @@ function AutonomousTradingSection() {
     setRsiOversold(envDefaults.rsi_oversold)
     setRsiOverbought(envDefaults.rsi_overbought)
     setVolumeSpikeMultiplier(envDefaults.volume_spike_multiplier)
+    setLongConfFloor(envDefaults.long_confidence_floor)
+    setShortConfFloor(envDefaults.short_confidence_floor)
+    setPeOverbought(envDefaults.pe_overbought)
+    setPeOversold(envDefaults.pe_oversold)
+    setTradingDays(envDefaults.trading_days)
+    setEodCloseWindow(envDefaults.eod_close_window_minutes)
+  }
+
+  const hasValidationErrors = () => {
+    const rsiOk  = parseFloat(rsiOversold) < parseFloat(rsiOverbought)
+    const peOk   = parseFloat(peOversold) < parseFloat(peOverbought)
+    const daysOk = /^[0-6](,[0-6])*$/.test(tradingDays.trim())
+    return !rsiOk || !peOk || !daysOk
   }
 
   const save = async () => {
+    if (hasValidationErrors()) { setSaveErr('Fix validation errors before saving'); setSaveStatus('error'); setTimeout(() => setSaveStatus(null), 3000); return }
     setSaveStatus('saving'); setSaveErr('')
     try {
       const r = await fetch(`${API}/settings/autotrade`, {
@@ -1084,6 +1200,12 @@ function AutonomousTradingSection() {
           rsi_oversold: Number(rsiOversold),
           rsi_overbought: Number(rsiOverbought),
           volume_spike_multiplier: Number(volumeSpikeMultiplier),
+          long_confidence_floor: Number(longConfFloor),
+          short_confidence_floor: Number(shortConfFloor),
+          pe_overbought: Number(peOverbought),
+          pe_oversold: Number(peOversold),
+          trading_days: tradingDays,
+          eod_close_window_minutes: Number(eodCloseWindow),
         }),
       })
       if (!r.ok) throw new Error(await r.text())
@@ -1125,6 +1247,8 @@ function AutonomousTradingSection() {
         <div className="settings-row-label">
           <span>RSI oversold</span>
           <span className="text-dim" style={{ fontSize: 12 }}>RSI below this → long signal candidate (lower = rarer, stronger signal)</span>
+          {parseFloat(rsiOversold) >= parseFloat(rsiOverbought) &&
+            <span style={{ fontSize: 12, color: '#f59e0b' }}>⚠ Must be below RSI overbought ({rsiOverbought})</span>}
         </div>
         <input className="settings-input" type="number" min={0} max={100} step={1}
                value={rsiOversold} onChange={e => setRsiOversold(e.target.value)}
@@ -1135,6 +1259,8 @@ function AutonomousTradingSection() {
         <div className="settings-row-label">
           <span>RSI overbought</span>
           <span className="text-dim" style={{ fontSize: 12 }}>RSI above this → short signal candidate (higher = rarer, stronger signal)</span>
+          {parseFloat(rsiOverbought) <= parseFloat(rsiOversold) &&
+            <span style={{ fontSize: 12, color: '#f59e0b' }}>⚠ Must be above RSI oversold ({rsiOversold})</span>}
         </div>
         <input className="settings-input" type="number" min={0} max={100} step={1}
                value={rsiOverbought} onChange={e => setRsiOverbought(e.target.value)}
@@ -1151,6 +1277,30 @@ function AutonomousTradingSection() {
                style={{ width: 70 }} />
       </div>
 
+      <div className="settings-row">
+        <div className="settings-row-label">
+          <span>P/E overbought</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>P/E above this flags the stock as overvalued in valuation signals</span>
+          {parseFloat(peOverbought) <= parseFloat(peOversold) &&
+            <span style={{ fontSize: 12, color: '#f59e0b' }}>⚠ Must be above P/E oversold ({peOversold})</span>}
+        </div>
+        <input className="settings-input" type="number" min={0} max={500} step={1}
+               value={peOverbought} onChange={e => setPeOverbought(e.target.value)}
+               style={{ width: 70 }} />
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-label">
+          <span>P/E oversold</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>P/E below this flags the stock as undervalued in valuation signals</span>
+          {parseFloat(peOversold) >= parseFloat(peOverbought) &&
+            <span style={{ fontSize: 12, color: '#f59e0b' }}>⚠ Must be below P/E overbought ({peOverbought})</span>}
+        </div>
+        <input className="settings-input" type="number" min={0} max={500} step={1}
+               value={peOversold} onChange={e => setPeOversold(e.target.value)}
+               style={{ width: 70 }} />
+      </div>
+
       <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0', opacity: 0.4 }} />
       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase',
                     letterSpacing: '0.09em', marginBottom: 10 }}>🎯 Confidence Gates</div>
@@ -1163,6 +1313,41 @@ function AutonomousTradingSection() {
         <input className="settings-input" type="number" min={0} max={100}
                value={confidenceFloor} onChange={e => setConfidenceFloor(e.target.value)}
                style={{ width: 70 }} />
+      </div>
+
+      <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+        <div className="settings-row-label">
+          <span>Per-order-type floor</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>
+            Override the general floor by order type — applies to both bracket and frac orders.
+            <br />0 = inherit the general floor above.
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>Long</span>
+              <input className="settings-input" type="number" min={0} max={100}
+                     value={longConfFloor} onChange={e => setLongConfFloor(e.target.value)}
+                     style={{ width: 60, textAlign: 'center' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>Short</span>
+              <input className="settings-input" type="number" min={0} max={100}
+                     value={shortConfFloor} onChange={e => setShortConfFloor(e.target.value)}
+                     style={{ width: 60, textAlign: 'center' }} />
+            </div>
+          </div>
+          {(() => {
+            const lv = parseFloat(longConfFloor), sv = parseFloat(shortConfFloor), gv = parseFloat(confidenceFloor)
+            const msgs = []
+            if (lv > 0 && lv === gv) msgs.push('Long = general floor, no extra effect')
+            if (lv > 0 && lv < gv)  msgs.push(`Long ${lv} < general ${gv} — weakens long gate`)
+            if (sv > 0 && sv === gv) msgs.push('Short = general floor, no extra effect')
+            if (sv > 0 && sv < gv)  msgs.push(`Short ${sv} < general ${gv} — weakens short gate`)
+            return msgs.length ? <span style={{ fontSize: 11, color: '#f59e0b' }}>⚠ {msgs.join(' · ')}</span> : null
+          })()}
+        </div>
       </div>
 
       <div className="settings-row">
@@ -1209,6 +1394,36 @@ function AutonomousTradingSection() {
         </select>
       </div>
 
+      <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0', opacity: 0.4 }} />
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase',
+                    letterSpacing: '0.09em', marginBottom: 10 }}>📅 Schedule</div>
+
+      <div className="settings-row">
+        <div className="settings-row-label">
+          <span>Trading days</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>Comma-separated day indices: 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+          <input className="settings-input" type="text" placeholder="0,1,2,3,4"
+                 value={tradingDays} onChange={e => setTradingDays(e.target.value)}
+                 style={{ width: 120 }} />
+          {!/^[0-6](,[0-6])*$/.test(tradingDays.trim()) &&
+            <span style={{ fontSize: 11, color: '#f59e0b' }}>⚠ Use comma-separated digits 0–6</span>}
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-label">
+          <span>EOD close window (minutes)</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>Stop opening new positions this many minutes before market close</span>
+        </div>
+        <input className="settings-input" type="number" min={0} max={120} step={1}
+               value={eodCloseWindow} onChange={e => setEodCloseWindow(e.target.value)}
+               style={{ width: 70 }} />
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0', opacity: 0.4 }} />
+
       <div className="settings-row">
         <div className="settings-row-label">
           <span>Allow live auto-frac</span>
@@ -1221,6 +1436,9 @@ function AutonomousTradingSection() {
         <input type="checkbox" checked={fracAllowLive}
                onChange={e => setFracAllowLive(e.target.checked)} />
       </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0', opacity: 0.4 }} />
+      <PurgeUntradableButton />
 
       <SaveRow status={saveStatus} errMsg={saveErr} onSave={save} />
     </SettingSection>

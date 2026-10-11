@@ -28,7 +28,7 @@ def test_untradable_counts_drops_and_distinct_tickers(check):
             f"2002-05-0{i + 1}T14:00:00Z",
             "warning",
             f"Dropped {ticker} short signal — no shortable/fractionable path",
-            {"ticker": ticker, "type": "short"},
+            {"ticker": ticker, "type": "short", "reason": "no shortable/fractionable path"},
         )
     _insert_event("2002-05-02T14:00:00Z", "warn", "LLM parse error for TGE: bad json")
     _insert_event("2002-05-03T14:00:00Z", "warning", "Some other scan warning")

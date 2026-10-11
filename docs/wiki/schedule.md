@@ -1,6 +1,6 @@
 # Schedule
 
-The **🗓 Schedule** page draws the whole trading week as a timeline, so you can see at a
+The **🗓 Schedule** page draws the whole trading week as a timetable, so you can see at a
 glance when the machine wakes, when scans fire, and when each report goes out — without
 reading cron expressions.
 
@@ -10,24 +10,28 @@ reading cron expressions.
 
 ## What it shows
 
-![Schedule page — the trading week as a timeline, with today's column highlighted](../screenshots/24-schedule.png)
+![Schedule page — the trading week as a timetable, with today's column highlighted](../screenshots/24-schedule.png)
 
-Five columns, Monday to Friday, with today's column highlighted. Each column lists the
-day's events in order:
+A timetable with **one time column on the left** and five day columns (Monday – Friday),
+today's column highlighted. Each row is one time slot shared by every day, so the same
+event lines up horizontally across the week. When two events fall in the same minute
+(typically a signal scan and a discovery run) they share one cell, each in its own colour.
+A red line marks the current time.
 
-| Event | Source |
-|---|---|
-| **System wake (Fly + Vercel)** | Cloudflare cron starts the Fly machine and puts the site back online |
-| **Market opens** | US market open (09:30 ET) |
-| **Signal scan** | In-process scheduler, repeating every `scan_interval_minutes` |
-| **Discovery run** | Trending-ticker discovery, hourly when enabled |
-| **Market closes** | US market close (16:00 ET) |
-| **EOD report** | `GET /reports/eod/orders` + `GET /reports/eod/frac` |
-| **End-of-Week report** | Friday only — `GET /reports/weekly/orders` + `/weekly/frac` |
-| **System stop (Fly + Vercel)** | Cloudflare cron stops the Fly machine and takes the site offline |
+| Event | Day(s) | Notes |
+|---|---|---|
+| System wake (Fly + Vercel) | Mon–Fri | Cloudflare cron starts the backend and restores the Vercel alias (1 h before the open) |
+| Watchlist purge | Monday only | Removes persistently untradable tickers (≥ 5 drops in 7 days, zero signals). See [Watchlist hygiene](settings.md#watchlist-hygiene). |
+| Market opens | Mon–Fri | US market open (09:30 ET) |
+| Signal scan | Mon–Fri | Every slot shown; spacing is `scan_interval_minutes` |
+| Discovery run | Mon–Fri | Every run shown; interval read live from `GET /settings/discovery` (shown whether or not discovery is enabled) |
+| Market closes | Mon–Fri | US market close (16:00 ET) |
+| EoD report | Mon–Fri | `GET /reports/eod/orders` + `GET /reports/eod/frac` |
+| End-of-Week report | Friday only | `GET /reports/weekly/orders` + `GET /reports/weekly/frac` |
+| System stop (Fly + Vercel) | Mon–Fri | Cloudflare cron stops the backend and removes the Vercel alias |
 
-Because the scan interval is read live from `/settings`, changing it in
-**Settings → Scheduler** immediately redraws the timeline.
+Because the scan cadence and discovery interval are read live, changing them in
+**Settings** redraws the table on the next load. Hover a time to see its UTC equivalent.
 
 ---
 

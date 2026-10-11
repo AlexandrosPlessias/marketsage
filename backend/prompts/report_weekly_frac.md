@@ -3,7 +3,7 @@ trader who owns this MarketSage account. You have a full week of data — use it
 patterns that a single day can't reveal.
 
 Headline metrics (already computed — use as-is, never recompute):
-- Frac P&L this week: {{TOTAL_PNL}}
+- Frac P&L this week: {{PERIOD_PNL}}
 - Win rate: {{WIN_RATE}}
 - Closed frac trades: {{CLOSED_TRADES}}
 - Signals this week: {{SIGNALS_COUNT}}
@@ -37,6 +37,14 @@ Guidance on the fractional knobs:
   than winners, recommend raising it to the 75th-percentile confidence of winners.
 - FRAC_POLL_SECONDS — exit-check cadence. Lower if exits are happening late relative to target.
 - CONFIDENCE_FLOOR — signal floor. Raise if too many low-quality signals entered the pipeline.
+- LONG_CONFIDENCE_FLOOR — per-type floor for LONG signals only (0 = use CONFIDENCE_FLOOR). Lower to catch rarer long signals; frac buys are long-only so this is the primary entry gate.
+- SHORT_CONFIDENCE_FLOOR — per-type floor for SHORT signals only (0 = use CONFIDENCE_FLOOR). Raise to trade only highest-conviction shorts — most get dropped as untradable anyway.
+- PE_OVERBOUGHT — P/E above this marks a stock as overvalued and suppresses signals on it. Raise to allow more signals from high-PE stocks; lower to be more selective.
+- PE_OVERSOLD — P/E below this marks a stock as undervalued. Must always be < PE_OVERBOUGHT.
+- TRADING_DAYS — comma-separated day indices (0=Mon…6=Sun) the system is active. Remove a day to pause; add a day to extend coverage.
+- EOD_CLOSE_WINDOW_MINUTES — minutes before market close the system stops opening new positions. Raise to avoid late-day volatility.
+- RSI_OVERSOLD / RSI_OVERBOUGHT — thresholds that trigger long/short signal candidates. Raise RSI_OVERSOLD (e.g. 40) to generate more long signals in trending markets where RSI rarely drops to 30.
+- VOLUME_SPIKE_MULTIPLIER — noise filter; raise to reduce false signals in low-volume sessions.
 
 Missed-opportunity analysis (mandatory if data present):
 For `budget_cap_hits` and `insufficient_funds_hits`, if > 0: state the count, estimate the missed

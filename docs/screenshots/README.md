@@ -28,8 +28,9 @@ Captured with headless Chromium via [Playwright](https://playwright.dev).
 |---|---|
 | `13-trading-page.png` | Trading tab — account metrics tiles and equity curve chart |
 | `13c-open-positions.png` | Open Positions table — stop/target, Proximity slider, and the ⏳ SELLING indicator on a position whose exit is queued |
-| `13b-fractional-trading.png` | Trading tab → Fractional Trading sub-tab — notional tiles, icon-only State column, and the Proximity slider |
-| `14-trading-orders.png` | Trading tab — Orders table with first row expanded showing fill details |
+| `13b-fractional-trading.png` | Trading tab → Fractional Trading sub-tab — Closed trades (`Fees: $0 ⓘ`), Orders table, and the Fractional — Ticker Ledger with the first ticker expanded (Opened → Holding) |
+| `13d-earnings-tab.png` | Trading tab → Earnings sub-tab — today's Day P&L tiles and all-time blocks for Orders, Fractional and Combined. Data-dependent: all-time blocks and charts need closed trades to render fully |
+| `14-trading-orders.png` | Trading tab → Order Trading — Closed Orders (`Fees: $0 ⓘ`) and the Ticker Ledger with the first ticker's event history expanded |
 | `15-signal-card-order.png` | Dashboard — Signal card with order status badge |
 
 ### Discovery & Mobile

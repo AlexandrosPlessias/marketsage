@@ -27,6 +27,7 @@
  *   05-settings.png
  *   13-trading-page.png        ← Trading tab → Order Trading (account + charts)
  *   13b-fractional-trading.png ← Trading tab → Fractional Trading (tiles + positions)
+ *   13d-earnings-tab.png       ← Trading tab → Earnings (today + all-time P&L)
  *   14-trading-orders.png      ← Orders table (expanded row)
  *   15-signal-card-order.png   ← Signal card with order status badge + 🪙 Frac button
  *   16-discovery.png             ← Trending Discovery tab with scored candidates
@@ -36,7 +37,7 @@
  *   20-reports.png               ← Reports tab — Orders/Frac tabs, history + viewer
  *   25-reports-compare.png       ← Reports tab — two same-type reports compared
  *   21-activity.png              ← Activity tab — event feed with a notification row expanded
- *   24-schedule.png              ← Schedule tab — the trading week as a timeline
+ *   24-schedule.png              ← Schedule tab — the trading week as a timetable
  *   22-settings-autonomous.png   ← Settings → Autonomous trading section
  *   23-settings-notifications.png← Settings → Notifications (ntfy + Telegram)
  *
@@ -65,8 +66,14 @@ if (TOKEN) console.log('🔑 ADMIN_TOKEN set — will authenticate via login scr
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+// SCREENSHOT_ONLY=a.png,b.png — still runs every step (later shots depend on the
+// navigation state of earlier ones) but only writes the listed files.
+const ONLY = process.env.SCREENSHOT_ONLY ? new Set(process.env.SCREENSHOT_ONLY.split(',')) : null;
+const skip = (name) => ONLY && !ONLY.has(name) && (console.log('–', name, '(skipped)'), true);
+
 async function shot(page, name, fn) {
   await fn();
+  if (skip(name)) return;
   await page.waitForTimeout(900);
   const file = path.join(OUT, name);
   await page.screenshot({ path: file, fullPage: false });
@@ -76,6 +83,7 @@ async function shot(page, name, fn) {
 async function shotAt(page, name, locator) {
   const el = typeof locator === 'string' ? page.locator(locator).first() : locator;
   await el.scrollIntoViewIfNeeded();
+  if (skip(name)) return;
   await page.waitForTimeout(500);
   const file = path.join(OUT, name);
   await page.screenshot({ path: file, fullPage: false });
@@ -121,6 +129,20 @@ async function openSettingsSection(page, id) {
     el.scrollIntoView({ block: 'start' });
     window.scrollBy(0, -96);
   });
+  await page.waitForTimeout(400);
+}
+
+/** Expand a Ticker Ledger card (by its title) and its first ticker, scrolled into view. */
+async function openLedger(page, title) {
+  // Hidden tabs stay mounted, so only match the visible copy.
+  const header = page.locator(`span:text-is("${title}") >> visible=true`).first();
+  await header.waitFor({ timeout: 8000 });
+  await header.click();
+  await page.waitForTimeout(600);
+  const card = header.locator('xpath=../..');
+  await card.locator('td:has-text("▸")').first().click();
+  await page.waitForTimeout(800);
+  await card.evaluate((el) => { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -140); });
   await page.waitForTimeout(400);
 }
 
@@ -194,6 +216,15 @@ await shot(page, '13-trading-page.png', async () => {
   await page.waitForTimeout(3000); // let charts render
 });
 
+await shot(page, '13d-earnings-tab.png', async () => {
+  await page.click('button:has-text("Earnings")');
+  await page.waitForTimeout(2000);
+});
+
+// Back to Paper Orders so the following shots see the orders tables.
+await page.click('button:has-text("Paper Orders")');
+await page.waitForTimeout(800);
+
 // Open Positions table — shows the ⏳ SELLING / ⏳ Exit queued indicators, which
 // sit below the fold on 13-trading-page.png.
 await shot(page, '13c-open-positions.png', async () => {
@@ -204,27 +235,10 @@ await shot(page, '13c-open-positions.png', async () => {
   } catch { console.warn('⚠  Open Positions table not found'); }
 });
 
-// Scroll to the orders table and expand the first row
+// Closed Orders (Fees: $0 ⓘ) + Ticker Ledger with the first ticker's event history open
 await shot(page, '14-trading-orders.png', async () => {
-  // Still on Trading page — scroll to Orders section
-  try {
-    const ordersHeading = page.locator('text=Orders').first();
-    await ordersHeading.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(800);
-    // Try to find and click the first expandable order row (has ▸ toggle)
-    const firstToggle = page.locator('td:has-text("▸")').first();
-    const hasToggle = await firstToggle.isVisible().catch(() => false);
-    if (hasToggle) {
-      await firstToggle.locator('xpath=ancestor::tr[1]').click();
-      await page.waitForTimeout(1000);
-    } else {
-      // fallback: click first tbody tr in the orders table
-      const firstRow = page.locator('tbody tr').first();
-      await firstRow.waitFor({ timeout: 5000 });
-      await firstRow.click();
-      await page.waitForTimeout(800);
-    }
-  } catch { console.warn('⚠  No order rows found — screenshotting current view'); }
+  try { await openLedger(page, '📒 Ticker Ledger'); }
+  catch { console.warn('⚠  Paper Orders Ticker Ledger not found — screenshotting current view'); }
 });
 
 // ── 3. Signal card with order status ────────────────────────────────────────
@@ -382,9 +396,10 @@ await shot(page, '13b-fractional-trading.png', async () => {
   await page.click('text=Trading');
   await page.waitForTimeout(1000);
   try {
-    await page.locator('button:has-text("Fractional Trading")').first().click();
+    await page.locator('button:has-text("Fractional")').first().click();
     await page.waitForTimeout(2500); // let account tiles + positions render
-  } catch { console.warn('⚠  Fractional Trading tab not found'); }
+    await openLedger(page, '📒 Fractional — Ticker Ledger');
+  } catch { console.warn('⚠  Fractional tab / ledger not found'); }
 });
 
 await shot(page, '19-settings-fractional.png', async () => {

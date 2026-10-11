@@ -1123,7 +1123,7 @@ def evict_cache_entries(older_than_hours: int = 168, db_path: str | None = None)
 
     Default: 7 days.  Returns the number of rows deleted.
     """
-    cutoff = (datetime.utcnow() - timedelta(hours=older_than_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     with _connect(db_path) as conn:
         n = conn.execute("DELETE FROM data_cache WHERE cached_at < ?", (cutoff,)).rowcount
         conn.commit()
@@ -1330,26 +1330,33 @@ def get_blocked_event_counts(
             "SELECT meta FROM events WHERE category = 'order_blocked' AND ts >= ? AND ts < ?",
             (since_date, upper),
         ).fetchall()
-        dropped = conn.execute(
+        # Use meta JSON 'reason' field (authoritative) rather than a brittle
+        # message LIKE match — robust against future message wording changes.
+        dropped_rows = conn.execute(
             "SELECT meta FROM events WHERE category = 'scan' AND level = 'warning' "
-            "AND message LIKE 'Dropped %' AND ts >= ? AND ts < ?",
+            "AND ts >= ? AND ts < ?",
             (since_date, upper),
         ).fetchall()
 
     dropped_tickers: set[str] = set()
-    for (meta_str,) in dropped:
+    drop_count = 0
+    for (meta_str,) in dropped_rows:
         try:
-            ticker = (json.loads(meta_str) if meta_str else {}).get("ticker")
+            meta = json.loads(meta_str) if meta_str else {}
         except (ValueError, TypeError):
-            ticker = None
-        if ticker:
-            dropped_tickers.add(ticker)
+            meta = {}
+        if meta.get("reason") in ("not tradable", "no shortable/fractionable path"):
+            drop_count += 1
+            ticker = meta.get("ticker")
+            if ticker:
+                dropped_tickers.add(ticker)
 
     counts: dict[str, int] = {
         "position_cap_hits": 0,
         "budget_cap_hits": 0,
         "insufficient_funds_hits": 0,
-        "untradable_dropped": len(dropped),
+        "failed_hits": 0,
+        "untradable_dropped": drop_count,
         "untradable_tickers": len(dropped_tickers),
     }
     for (meta_str,) in rows:
@@ -1364,6 +1371,8 @@ def get_blocked_event_counts(
             counts["budget_cap_hits"] += 1
         elif reason == "insufficient_funds":
             counts["insufficient_funds_hits"] += 1
+        elif reason == "failed":
+            counts["failed_hits"] += 1
     return counts
 
 
@@ -1596,6 +1605,8 @@ def get_frac_economics_all_time(db_path: str | None = None) -> dict[str, Any]:
               SUM(realized_pnl > 0)                                          AS wins,
               SUM(realized_pnl < 0)                                          AS losses,
               COALESCE(SUM(realized_pnl), 0)                                 AS total_pnl,
+              COALESCE(SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl END), 0) AS win_pnl,
+              COALESCE(SUM(CASE WHEN realized_pnl < 0 THEN realized_pnl END), 0) AS loss_pnl,
               SUM(status = 'open')                                           AS open_positions,
               COALESCE(SUM(CASE WHEN status = 'open' THEN notional END), 0)  AS notional_open
             FROM frac_positions
@@ -1608,6 +1619,8 @@ def get_frac_economics_all_time(db_path: str | None = None) -> dict[str, Any]:
         "losses": int(r["losses"] or 0),
         "open_positions": int(r["open_positions"] or 0),
         "total_pnl": float(r["total_pnl"] or 0),
+        "win_pnl": float(r["win_pnl"] or 0),
+        "loss_pnl": float(r["loss_pnl"] or 0),
         "win_rate": wins / closed * 100 if closed else None,
         "notional_open": float(r["notional_open"] or 0),
     }
@@ -1942,6 +1955,92 @@ def add_watchlist_tickers(tickers: list[str], db_path: str | None = None) -> lis
         set_setting("watchlist_added", json.dumps(added), db_path)
         set_setting("watchlist_removed", json.dumps(removed), db_path)
     return newly
+
+
+def remove_watchlist_tickers(tickers: list[str], db_path: str | None = None) -> list[str]:
+    """Remove tickers from the effective watchlist; return the ones actually removed.
+
+    Adds each ticker to ``watchlist_removed`` and strips it from
+    ``watchlist_added`` so the removal persists across restarts.
+    """
+    added: list[str] = json.loads(get_setting("watchlist_added", "[]", db_path))
+    removed: list[str] = json.loads(get_setting("watchlist_removed", "[]", db_path))
+    removed_set = set(removed)
+    evicted: list[str] = []
+    for raw in tickers:
+        t = (raw or "").strip().upper()
+        if not t:
+            continue
+        if t in added:
+            added.remove(t)
+        if t not in removed_set:
+            removed.append(t)
+            removed_set.add(t)
+            evicted.append(t)
+    if evicted:
+        set_setting("watchlist_added", json.dumps(added), db_path)
+        set_setting("watchlist_removed", json.dumps(removed), db_path)
+    return evicted
+
+
+def get_persistently_untradable_tickers(
+    days: int = 7, min_drops: int = 3, db_path: str | None = None
+) -> list[dict]:
+    """Return watchlist tickers that have ONLY untradable drops and zero tradable
+    signals in the last *days* days.
+
+    A ticker qualifies for removal when:
+    - It appears at least *min_drops* times in scan-warning events with reason
+      "no shortable/fractionable path" or "not tradable" in the window.
+    - It has zero rows in the ``signals`` table in the same window (i.e. no
+      signal ever passed through the pipeline to storage).
+
+    Returns a list of dicts: {ticker, drop_count, first_seen, last_seen}.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    watchlist = set(get_effective_watchlist(db_path))
+
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT meta, ts FROM events "
+            "WHERE category='scan' AND level='warning' AND ts >= ?",
+            (since,),
+        ).fetchall()
+
+        # Tickers that DID produce at least one stored signal in the window
+        signal_rows = conn.execute(
+            "SELECT DISTINCT ticker FROM signals WHERE created_at >= ?",
+            (since,),
+        ).fetchall()
+
+    tradable_in_window: set[str] = {r[0].upper() for r in signal_rows}
+
+    drop_counts: dict[str, dict] = {}
+    for meta_str, ts in rows:
+        try:
+            meta = json.loads(meta_str) if meta_str else {}
+        except (ValueError, TypeError):
+            meta = {}
+        if meta.get("reason") not in ("not tradable", "no shortable/fractionable path"):
+            continue
+        ticker = (meta.get("ticker") or "").upper()
+        if not ticker or ticker not in watchlist or ticker in tradable_in_window:
+            continue
+        if ticker not in drop_counts:
+            drop_counts[ticker] = {"ticker": ticker, "drop_count": 0, "first_seen": ts, "last_seen": ts}
+        drop_counts[ticker]["drop_count"] += 1
+        if ts < drop_counts[ticker]["first_seen"]:
+            drop_counts[ticker]["first_seen"] = ts
+        if ts > drop_counts[ticker]["last_seen"]:
+            drop_counts[ticker]["last_seen"] = ts
+
+    return sorted(
+        [d for d in drop_counts.values() if d["drop_count"] >= min_drops],
+        key=lambda x: x["drop_count"],
+        reverse=True,
+    )
 
 
 # --------------------------------------------------------------------------- #

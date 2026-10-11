@@ -81,8 +81,15 @@ def _next_grid_time(ref: datetime, interval_seconds: int) -> datetime:
     return datetime.fromtimestamp(next_epoch, tz=ref.tzinfo)
 
 
-def _near_market_close(minutes: int = 10) -> bool:
-    """Return True within *minutes* of the regular-session close."""
+def _near_market_close(minutes: int | None = None) -> bool:
+    """Return True within *minutes* of the regular-session close.
+
+    When *minutes* is None (default) it reads ``eod_close_window_minutes``
+    from the DB (settable from the UI) falling back to 15 minutes.
+    """
+    if minutes is None:
+        _raw = get_setting("eod_close_window_minutes", "")
+        minutes = int(_raw) if _raw and _raw.isdigit() else 15
     hours = get_settings().market_hours
     now = datetime.now(hours.tzinfo)
     close_minutes = hours.close_hour * 60 + hours.close_minute
@@ -622,8 +629,17 @@ class MonitorScheduler:
             except Exception as exc:
                 _log.warning("startup paper sync error: %s", exc)
 
-            # Wait for the first grid slot so all scans fire at :00/:15/:30/:45
-            # (and discovery at :00 on the hour) rather than immediately at startup.
+            # Fire an immediate scan when the market is already open at startup
+            # so signals are not missed during the gap to the first grid slot.
+            if is_market_open():
+                _log.info("market open at startup — running immediate scan before grid alignment")
+                try:
+                    await scan_watchlist(send_alerts=True)
+                    self.last_run = datetime.now(settings.market_hours.tzinfo).isoformat()
+                except Exception as exc:
+                    _log.error("startup scan error: %s", exc)
+
+            # Wait for the next grid slot so subsequent scans fire at :00/:15/:30/:45.
             _init_interval = max(60, settings.scan_interval_minutes * 60)
             _now = datetime.now(settings.market_hours.tzinfo)
             _first_fire = _next_grid_time(_now, _init_interval)
@@ -657,6 +673,41 @@ class MonitorScheduler:
                         _log.warning("discovery cycle error: %s", exc)
                 else:
                     _log.info("market closed — sleeping")
+
+                # Weekly untradable-ticker purge — runs once on Monday before the
+                # first scan so persistently-dropping tickers don't waste cycles.
+                now_tz = datetime.now(settings.market_hours.tzinfo)
+                if now_tz.weekday() == 0 and not getattr(self, "_purged_today", False):
+                    try:
+                        from backend.database import (
+                            get_persistently_untradable_tickers,
+                            remove_watchlist_tickers,
+                        )
+
+                        _purge_days = int(get_setting("untradable_purge_days", "") or 7)
+                        _purge_min = int(get_setting("untradable_purge_min_drops", "") or 5)
+                        candidates = get_persistently_untradable_tickers(
+                            days=_purge_days, min_drops=_purge_min
+                        )
+                        if candidates:
+                            evicted = remove_watchlist_tickers(
+                                [c["ticker"] for c in candidates]
+                            )
+                            if evicted:
+                                save_event(
+                                    "system",
+                                    f"Weekly purge: removed {len(evicted)} persistently "
+                                    f"untradable ticker(s): {', '.join(evicted)}",
+                                    meta={"tickers": evicted},
+                                )
+                                _log.info(
+                                    "weekly untradable purge: removed %s", evicted
+                                )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        _log.warning("untradable purge error: %s", exc)
+                    self._purged_today = True
+                elif now_tz.weekday() != 0:
+                    self._purged_today = False
 
                 # Sync paper order statuses every cycle (market open or closed) so
                 # EOD fills and any orders placed while the app was down are

@@ -105,16 +105,18 @@ docker exec ollama ollama pull qwen2.5:14b
 
 ## Signal thresholds
 
-| Variable | Default | Description |
-|---|---|---|
-| `RSI_OVERSOLD` | `30` | RSI below this on 2+ timeframes → long candidate |
-| `RSI_OVERBOUGHT` | `70` | RSI above this on 2+ timeframes → short candidate |
-| `VOLUME_SPIKE_MULTIPLIER` | `2.0` | Volume must be this many times the 20-day average to trigger volume-spike rule |
-| `SIGNIFICANT_MOVE_PCT` | `2.0` | Day price move (%) required alongside a volume spike |
-| `CONFIDENCE_FLOOR` | `75` | Minimum 0–100 confidence for a signal to be stored and alerted. Runtime-mutable via **Settings → Autonomous**. |
-| `signal_realert_delta` (DB setting only) | `10` | Points of confidence a **repeat** signal must gain before it alerts again on the same day. `0` disables re-alerts entirely. See [Alert deduplication](notifications.md#alert-deduplication). |
+| Variable | Default | Runtime-mutable | Description |
+|---|---|---|---|
+| `RSI_OVERSOLD` | `30` | ✗ | RSI below this on 2+ timeframes → long candidate. Edit `.env` then `make up` to apply. |
+| `RSI_OVERBOUGHT` | `70` | ✗ | RSI above this on 2+ timeframes → short candidate. |
+| `VOLUME_SPIKE_MULTIPLIER` | `2.0` | ✗ | Volume must be this many times the 20-day average to trigger volume-spike rule. |
+| `SIGNIFICANT_MOVE_PCT` | `2.0` | ✗ | Day price move (%) required alongside a volume spike. |
+| `CONFIDENCE_FLOOR` | `75` | ✓ (Settings → Autonomous) | Minimum 0–100 confidence for a signal to be stored and alerted. |
+| `signal_realert_delta` (DB setting only) | `10` | ✓ (Settings → Autonomous) | Points of confidence a **repeat** signal must gain before it alerts again on the same day. `0` disables re-alerts entirely. See [Alert deduplication](notifications.md#alert-deduplication). |
+| `PE_OVERBOUGHT` | `60` | ✓ (Settings → Autonomous) | TTM P/E above this triggers a low-confidence short candidate (valuation rule). |
+| `PE_OVERSOLD` | `8` | ✓ (Settings → Autonomous) | Positive TTM P/E below this triggers a low-confidence long candidate. Must be `< PE_OVERBOUGHT`. |
 
-The RSI / volume / move thresholds are read-only from the UI — edit `.env` then `make up` to recreate the container. `CONFIDENCE_FLOOR` is also a live DB override (Settings → Autonomous).
+RSI / volume / move thresholds require a container restart (`.env` → `make up`). The remaining thresholds above are live DB overrides — no restart needed.
 
 ---
 
@@ -131,6 +133,8 @@ behaviour and the tradability gate.
 | `FRAC_TRADING_ENABLED` | `false` | ✓ | Master switch — auto-place fractional buys from signals. |
 | `FRAC_MIN_CONFIDENCE` | `85` | ✓ | Stricter confidence floor for fractional buys (they commit notional). |
 | `PAPER_TRADE_MIN_CONFIDENCE` | `0` | ✓ | Optional bracket-only floor; `0` falls back to `CONFIDENCE_FLOOR`. |
+| `LONG_CONFIDENCE_FLOOR` | `0` | ✓ | Per-direction floor for **long** signals (frac and bracket). `0` inherits the general `CONFIDENCE_FLOOR`. Raise to filter weaker longs without affecting shorts. |
+| `SHORT_CONFIDENCE_FLOOR` | `0` | ✓ | Per-direction floor for **short** signals (bracket only — frac is long-only). `0` inherits the general floor. Raise if shorts mostly drop as untradable. |
 | `PAPER_MAX_POSITIONS` | `5` | ✓ | Hold new bracket orders once this many positions are open. |
 | `SIGNAL_DROP_MODE` | `untradable` | ✓ | Tradability gate: `untradable` (drop only permanently unactionable) · `strict` (currently identical to `untradable`; reserved) · `never` (annotate only). See [Paper Trading § The tradability gate](paper-trading.md#the-tradability-gate). |
 | `FRAC_AUTOTRADE_ALLOW_LIVE` | `false` | ✓ | Safety rail — autonomous frac buys stay paper-only unless `true`. |
@@ -138,6 +142,33 @@ behaviour and the tradability gate.
 | `DISCOVERY_AUTOADD_TOP_N` | `5` | ✓ | Per-run cap on auto-added candidates (strongest N by score). |
 
 ![Settings — Autonomous trading section](../screenshots/22-settings-autonomous.png)
+
+---
+
+## Watchlist hygiene
+
+Over time, tickers that are permanently untradable (cannot be shorted, not fractionable,
+or flagged as not tradable by Alpaca) accumulate in the watchlist and generate only drop
+events on every scan — wasting cycles without ever producing an actionable signal.
+
+**Settings → Autonomous → 🧹 Watchlist Hygiene** provides a purge tool:
+
+1. **Preview** — shows tickers that had ≥ N drop events in the last D days with zero
+   stored signals (fully untradable). Default: last 7 days, minimum 3 drops.
+2. **Confirm and remove** — moves each selected ticker from the active watchlist to the
+   `watchlist_removed` table and strips it from `watchlist_added`. The purge is logged as
+   an event.
+
+A **weekly automatic purge** also runs every Monday at the start of the scheduler loop,
+using configurable thresholds (default: 7-day window, minimum 5 drops). You can adjust
+these via the `untradable_purge_days` and `untradable_purge_min_drops` DB settings.
+
+### API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/settings/watchlist/untradable-preview?days=7&min_drops=3` | Preview tickers to be purged (no changes made) |
+| `POST` | `/settings/watchlist/purge-untradable?days=7&min_drops=3` | Remove persistently untradable tickers from the watchlist |
 
 ---
 
@@ -179,18 +210,20 @@ boot-time defaults / fallbacks.
 
 ---
 
-## Market hours
+## Market hours & schedule
 
-| Variable | Default | Description |
-|---|---|---|
-| `MARKET_TIMEZONE` | `America/New_York` | Timezone for market-hours checks |
-| `MARKET_OPEN_HOUR` | `9` | Market open hour (24h, local timezone) |
-| `MARKET_OPEN_MINUTE` | `30` | Market open minute |
-| `MARKET_CLOSE_HOUR` | `16` | Market close hour |
-| `MARKET_CLOSE_MINUTE` | `0` | Market close minute |
+| Variable | Default | Runtime-mutable | Description |
+|---|---|---|---|
+| `MARKET_TIMEZONE` | `America/New_York` | ✗ | Timezone for market-hours checks. |
+| `MARKET_OPEN_HOUR` | `9` | ✗ | Market open hour (24h, local timezone). |
+| `MARKET_OPEN_MINUTE` | `30` | ✗ | Market open minute. |
+| `MARKET_CLOSE_HOUR` | `16` | ✗ | Market close hour. |
+| `MARKET_CLOSE_MINUTE` | `0` | ✗ | Market close minute. |
+| `TRADING_DAYS` | `0,1,2,3,4` | ✓ (Settings → Autonomous) | Comma-separated day indices on which scanning is active. `0=Mon … 6=Sun`. Remove a day to pause trading on it. Default is Mon–Fri. |
+| `EOD_CLOSE_WINDOW_MINUTES` | `15` | ✓ (Settings → Autonomous) | Minutes before market close during which no new positions are opened. Positions already open are unaffected; this only blocks new entries near the close. |
 
-The scheduler only scans while the market is open (Mon–Fri, 9:30–16:00 ET by default).
-Outside these hours it sleeps until the next interval.
+The scheduler only scans while the market is open and on an active trading day.
+Non-runtime variables require `.env` edit + `make up` to apply.
 
 ---
 
