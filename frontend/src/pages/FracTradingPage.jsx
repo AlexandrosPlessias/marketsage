@@ -66,6 +66,18 @@ export default function FracTradingPage({ onOpenExplorer }) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedPos, setExpandedPos] = useState(null)
   const [expandedClosed, setExpandedClosed] = useState(null)
+  const [expandedLedger, setExpandedLedger] = useState(false)
+  const [expandedLedgerTicker, setExpandedLedgerTicker] = useState(null)
+  const [bracketOrders, setBracketOrders] = useState([])
+  const [expandedBracketLedger, setExpandedBracketLedger] = useState(false)
+  const [expandedBracketTicker, setExpandedBracketTicker] = useState(null)
+
+  useEffect(() => {
+    fetch(`${API}/paper/orders?limit=500`, { headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d?.orders && setBracketOrders(d.orders))
+      .catch(() => {})
+  }, [])
 
   const refreshAll = async () => {
     setRefreshing(true)
@@ -460,9 +472,14 @@ export default function FracTradingPage({ onOpenExplorer }) {
 
       {/* Closed trades */}
       <div className="card">
-        <div className="card-title">
-          Closed trades <span style={{ color: 'var(--dim)', fontWeight: 400 }}>({closed.length})</span>
-          {closed.length > 0 && <span style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 400, marginLeft: 6 }}>· click a row for breakdown</span>}
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span>Closed trades</span>
+          <span style={{ color: 'var(--dim)', fontWeight: 400 }}>({closed.length})</span>
+          {closed.length > 0 && <span style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 400 }}>· click a row for breakdown</span>}
+          <span
+            title="Alpaca paper accounts charge $0 commission — no fees are deducted from P&L"
+            style={{ fontSize: 10, color: 'var(--dim)', cursor: 'help', marginLeft: 'auto' }}
+          >Fees: $0 ⓘ</span>
         </div>
         {closed.length === 0
           ? <div style={{ fontSize: 13, color: 'var(--dim)', padding: '8px 0' }}>No closed fractional trades yet.</div>
@@ -649,6 +666,297 @@ export default function FracTradingPage({ onOpenExplorer }) {
           </div>
         </div>
       )}
+
+      {/* ── Ticker Ledger — balance-sheet grouped by ticker ── */}
+      {closed.length > 0 && (() => {
+        const byTicker = closed.reduce((acc, p) => {
+          const t = p.ticker
+          if (!acc[t]) acc[t] = { ticker: t, positions: [], totalNotional: 0, totalPnl: 0, wins: 0, losses: 0, lastClosed: null }
+          acc[t].positions.push(p)
+          acc[t].totalNotional += parseFloat(p.notional ?? 0)
+          acc[t].totalPnl      += parseFloat(p.realized_pnl ?? 0)
+          if ((p.realized_pnl ?? 0) > 0) acc[t].wins++
+          else acc[t].losses++
+          if (p.closed_at && (!acc[t].lastClosed || p.closed_at > acc[t].lastClosed)) acc[t].lastClosed = p.closed_at
+          return acc
+        }, {})
+        const rows = Object.values(byTicker).sort((a, b) => Math.abs(b.totalPnl) - Math.abs(a.totalPnl))
+        const fmtDate = iso => iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' }) : '—'
+        const fmtTime = iso => iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+        const exitLabel = reason => ({ target: '✅ Target', stop: '🛑 Stop', eod: '🌙 EoD', reconciled: '🔄 Reconciled' }[reason] ?? '⏹ Closed')
+        return (
+          <div className="card">
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setExpandedLedger(v => !v)}
+            >
+              <span className="card-title" style={{ marginBottom: 0 }}>📒 Ticker Ledger</span>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>({rows.length} tickers)</span>
+              <span style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 'auto' }}>{expandedLedger ? '▾' : '▸'}</span>
+            </div>
+            {expandedLedger && (
+              <div style={{ marginTop: 12 }}>
+                <div className="table-wrap">
+                  <table className="table-compact">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Ticker</th>
+                        <th style={{ textAlign: 'right' }}>Trades</th>
+                        <th style={{ textAlign: 'right' }}>Invested</th>
+                        <th style={{ textAlign: 'right' }}>Wins</th>
+                        <th style={{ textAlign: 'right' }}>Losses</th>
+                        <th style={{ textAlign: 'right' }}>Total P&L</th>
+                        <th>Last closed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(row => {
+                        const isOpen = expandedLedgerTicker === row.ticker
+                        const pColor = row.totalPnl > 0 ? GREEN : row.totalPnl < 0 ? RED : 'var(--dim)'
+                        const sep = '1px solid color-mix(in srgb, var(--border) 25%, transparent)'
+                        const tdBase = { padding: '3px 10px 3px 0', borderBottom: sep }
+                        return (
+                          <Fragment key={row.ticker}>
+                            <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedLedgerTicker(isOpen ? null : row.ticker)}>
+                              <td style={{ width: 20, color: 'var(--dim)', fontSize: 11, userSelect: 'none' }}>{isOpen ? '▾' : '▸'}</td>
+                              <td><span className="badge-ticker">{row.ticker}</span></td>
+                              <td style={{ textAlign: 'right', color: 'var(--dim)', fontSize: 11 }}>{row.positions.length}</td>
+                              <td style={{ textAlign: 'right', fontSize: 11 }}>${row.totalNotional.toFixed(0)}</td>
+                              <td style={{ textAlign: 'right', color: GREEN, fontSize: 11 }}>{row.wins}</td>
+                              <td style={{ textAlign: 'right', color: RED, fontSize: 11 }}>{row.losses}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 12, color: pColor }}>{row.totalPnl >= 0 ? '+' : ''}${Math.abs(row.totalPnl).toFixed(2)}</td>
+                              <td style={{ color: 'var(--dim)', fontSize: 11 }}>{fmtDate(row.lastClosed)}</td>
+                            </tr>
+                            {isOpen && (
+                              <tr>
+                                <td colSpan={8} style={{ padding: '4px 0 10px 28px', background: 'color-mix(in srgb, var(--surface) 60%, transparent)' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                                    <thead>
+                                      <tr style={{ color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>
+                                        <th style={{ textAlign: 'left', ...tdBase, fontWeight: 600 }}>Event</th>
+                                        <th style={{ textAlign: 'left', padding: '3px 10px', fontWeight: 600 }}>When</th>
+                                        <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Price</th>
+                                        <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Amount</th>
+                                        <th style={{ textAlign: 'right', padding: '3px 0 3px 10px', fontWeight: 600 }}>P&L</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {row.positions
+                                        .slice()
+                                        .sort((a, b) => new Date(a.opened_at) - new Date(b.opened_at))
+                                        .flatMap((p, posIdx) => {
+                                          const pnl = p.realized_pnl != null ? parseFloat(p.realized_pnl) : null
+                                          const pnlC = pnl > 0 ? GREEN : pnl < 0 ? RED : 'var(--dim)'
+                                          const evRows = []
+                                          if (posIdx > 0) {
+                                            evRows.push(
+                                              <tr key={`sep-${p.id}`}>
+                                                <td colSpan={5} style={{ padding: '2px 0', borderBottom: '1px solid var(--border)' }} />
+                                              </tr>
+                                            )
+                                          }
+                                          evRows.push(
+                                            <tr key={`open-${p.id}`}>
+                                              <td style={{ ...tdBase, color: GREEN, fontWeight: 700 }}>▲ Opened</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(p.opened_at)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right' }}>
+                                                {p.entry_price != null ? `$${parseFloat(p.entry_price).toFixed(2)}` : '—'}
+                                              </td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right' }}>
+                                                {p.notional != null ? `$${parseFloat(p.notional).toFixed(0)}` : '—'}
+                                                {p.qty ? <span style={{ color: 'var(--dim)' }}> · {fmtQty(p.qty, p.notional, p.entry_price)} sh</span> : null}
+                                              </td>
+                                              <td style={{ ...tdBase, padding: '3px 0 3px 10px' }} />
+                                            </tr>
+                                          )
+                                          evRows.push(
+                                            <tr key={`close-${p.id}`}>
+                                              <td style={{ ...tdBase, color: pnlC, fontWeight: 700 }}>{exitLabel(p.exit_reason)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(p.closed_at)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right', fontWeight: 600 }}>
+                                                {p.exit_price != null ? `$${parseFloat(p.exit_price).toFixed(2)}` : '—'}
+                                              </td>
+                                              <td style={{ ...tdBase, padding: '3px 10px' }} />
+                                              <td style={{ ...tdBase, padding: '3px 0 3px 10px', textAlign: 'right', fontWeight: 700, color: pnlC }}>
+                                                {pnl != null ? `${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}` : '—'}
+                                              </td>
+                                            </tr>
+                                          )
+                                          return evRows
+                                        })
+                                      }
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ── Order Trading Ticker Ledger (bracket orders from primary account) ── */}
+      {(() => {
+        const ACTIVE = new Set(['new','pending_new','accepted','held','partially_filled'])
+        const closedBracket = bracketOrders.filter(o => {
+          if (ACTIVE.has(o.status)) return false
+          if (o.status === 'filled' && o.notional != null && o.realized_pnl == null) return false
+          return true
+        })
+        if (closedBracket.length === 0) return null
+        const byTicker = closedBracket.reduce((acc, o) => {
+          const t = o.ticker
+          if (!acc[t]) acc[t] = { ticker: t, trades: [], totalNotional: 0, totalPnl: 0, wins: 0, losses: 0, lastClosed: null }
+          acc[t].trades.push(o)
+          acc[t].totalNotional += parseFloat(o.notional ?? 0)
+          acc[t].totalPnl      += parseFloat(o.realized_pnl ?? 0)
+          if ((o.realized_pnl ?? 0) > 0) acc[t].wins++
+          else acc[t].losses++
+          const closedAt = o.filled_at || o.closed_at
+          if (closedAt && (!acc[t].lastClosed || closedAt > acc[t].lastClosed)) acc[t].lastClosed = closedAt
+          return acc
+        }, {})
+        const rows = Object.values(byTicker).sort((a, b) => Math.abs(b.totalPnl) - Math.abs(a.totalPnl))
+        const fmtDate = iso => iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' }) : '—'
+        const fmtTime = iso => iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+        return (
+          <div className="card">
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setExpandedBracketLedger(v => !v)}
+            >
+              <span className="card-title" style={{ marginBottom: 0 }}>📒 Order Trading — Ticker Ledger</span>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>({rows.length} tickers)</span>
+              <span style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 'auto' }}>{expandedBracketLedger ? '▾' : '▸'}</span>
+            </div>
+            {expandedBracketLedger && (
+              <div style={{ marginTop: 12 }}>
+                <div className="table-wrap">
+                  <table className="table-compact">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Ticker</th>
+                        <th style={{ textAlign: 'right' }}>Trades</th>
+                        <th style={{ textAlign: 'right' }}>Invested</th>
+                        <th style={{ textAlign: 'right' }}>Wins</th>
+                        <th style={{ textAlign: 'right' }}>Losses</th>
+                        <th style={{ textAlign: 'right' }}>Total P&L</th>
+                        <th>Last closed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(row => {
+                        const isOpen = expandedBracketTicker === row.ticker
+                        const pColor = row.totalPnl > 0 ? GREEN : row.totalPnl < 0 ? RED : 'var(--dim)'
+                        const sep = '1px solid color-mix(in srgb, var(--border) 25%, transparent)'
+                        const tdBase = { padding: '3px 10px 3px 0', borderBottom: sep }
+                        return (
+                          <Fragment key={row.ticker}>
+                            <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedBracketTicker(isOpen ? null : row.ticker)}>
+                              <td style={{ width: 20, color: 'var(--dim)', fontSize: 11, userSelect: 'none' }}>{isOpen ? '▾' : '▸'}</td>
+                              <td><span className="badge-ticker">{row.ticker}</span></td>
+                              <td style={{ textAlign: 'right', color: 'var(--dim)', fontSize: 11 }}>{row.trades.length}</td>
+                              <td style={{ textAlign: 'right', fontSize: 11 }}>${row.totalNotional.toFixed(0)}</td>
+                              <td style={{ textAlign: 'right', color: GREEN, fontSize: 11 }}>{row.wins}</td>
+                              <td style={{ textAlign: 'right', color: RED, fontSize: 11 }}>{row.losses}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 12, color: pColor }}>{row.totalPnl >= 0 ? '+' : ''}${Math.abs(row.totalPnl).toFixed(2)}</td>
+                              <td style={{ color: 'var(--dim)', fontSize: 11 }}>{fmtDate(row.lastClosed)}</td>
+                            </tr>
+                            {isOpen && (
+                              <tr>
+                                <td colSpan={8} style={{ padding: '4px 0 10px 28px', background: 'color-mix(in srgb, var(--surface) 60%, transparent)' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                                    <thead>
+                                      <tr style={{ color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>
+                                        <th style={{ textAlign: 'left', ...tdBase, fontWeight: 600 }}>Event</th>
+                                        <th style={{ textAlign: 'left', padding: '3px 10px', fontWeight: 600 }}>When</th>
+                                        <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Price</th>
+                                        <th style={{ textAlign: 'right', padding: '3px 10px', fontWeight: 600 }}>Amount</th>
+                                        <th style={{ textAlign: 'right', padding: '3px 0 3px 10px', fontWeight: 600 }}>P&L</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {row.trades
+                                        .slice()
+                                        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                                        .flatMap((o, tradeIdx) => {
+                                          const direction = o.side === 'buy' ? 1 : -1
+                                          const qty = o.qty != null ? parseFloat(o.qty) : (o.entry_price ? Math.floor((o.notional ?? 500) / o.entry_price) : null)
+                                          const exitPrice = o.exit_price ?? (o.realized_pnl != null && qty ? o.filled_avg_price + o.realized_pnl / (qty * direction) : null)
+                                          const closedAt = o.closed_at || o.filled_at
+                                          const pnl = o.realized_pnl != null ? parseFloat(o.realized_pnl) : null
+                                          const pnlC = pnl > 0 ? GREEN : pnl < 0 ? RED : 'var(--dim)'
+                                          const dirColor = o.side === 'buy' ? GREEN : RED
+                                          const dirLabel = o.side === 'buy' ? '▲ LONG' : '▼ SHORT'
+                                          const evRows = []
+                                          if (tradeIdx > 0) evRows.push(
+                                            <tr key={`sep-${o.id}`}><td colSpan={5} style={{ padding: '2px 0', borderBottom: '1px solid var(--border)' }} /></tr>
+                                          )
+                                          evRows.push(
+                                            <tr key={`placed-${o.id}`}>
+                                              <td style={{ ...tdBase, color: dirColor, fontWeight: 700 }}>{dirLabel} Placed</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(o.created_at)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right' }}>
+                                                {o.entry_price != null ? `$${parseFloat(o.entry_price).toFixed(2)}` : '—'}
+                                              </td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right' }}>
+                                                {o.notional != null ? `$${parseFloat(o.notional).toFixed(0)}` : '—'}
+                                                {qty ? <span style={{ color: 'var(--dim)' }}> · {qty} sh</span> : null}
+                                              </td>
+                                              <td style={{ ...tdBase, padding: '3px 0 3px 10px', textAlign: 'right', color: 'var(--dim)', fontSize: 10 }}>
+                                                {o.stop_price != null ? `stop $${parseFloat(o.stop_price).toFixed(2)}` : ''}
+                                              </td>
+                                            </tr>
+                                          )
+                                          if (o.filled_avg_price != null) evRows.push(
+                                            <tr key={`filled-${o.id}`}>
+                                              <td style={{ ...tdBase, color: 'var(--dim)' }}>✓ Filled</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(o.filled_at)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right', fontWeight: 600 }}>${parseFloat(o.filled_avg_price).toFixed(2)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px' }} />
+                                              <td style={{ ...tdBase, padding: '3px 0 3px 10px' }} />
+                                            </tr>
+                                          )
+                                          evRows.push(
+                                            <tr key={`closed-${o.id}`}>
+                                              <td style={{ ...tdBase, color: pnlC, fontWeight: 700 }}>⏹ Closed</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', color: 'var(--dim)' }}>{fmtTime(closedAt)}</td>
+                                              <td style={{ ...tdBase, padding: '3px 10px', textAlign: 'right', fontWeight: 600 }}>
+                                                {exitPrice != null ? `$${parseFloat(exitPrice).toFixed(2)}` : '—'}
+                                              </td>
+                                              <td style={{ ...tdBase, padding: '3px 10px' }} />
+                                              <td style={{ ...tdBase, padding: '3px 0 3px 10px', textAlign: 'right', fontWeight: 700, color: pnlC }}>
+                                                {pnl != null ? `${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}` : '—'}
+                                              </td>
+                                            </tr>
+                                          )
+                                          return evRows
+                                        })}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }

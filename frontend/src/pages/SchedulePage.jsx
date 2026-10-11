@@ -65,7 +65,7 @@ function utcOnTradingDay(openTime, hh, mm) {
   return new Date(Date.UTC(openTime.getUTCFullYear(), openTime.getUTCMonth(), openTime.getUTCDate(), hh, mm))
 }
 
-function buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryEnabled, discoveryIntervalMinutes) {
+function buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryIntervalMinutes) {
   const tz = marketHours.timezone || 'America/New_York'
   const openTime = parseHHMM(marketHours.open, dayDate, tz)
   const closeTime = parseHHMM(marketHours.close, dayDate, tz)
@@ -97,21 +97,22 @@ function buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryEnabled
     scanTimes.slice(0, 3).forEach(st => {
       events.push({ time: st, label: `Signal scan`, color: '#60a5fa', bg: '#0f1d30' })
     })
-    events.push({ time: null, label: `… every ${scanIntervalMinutes}m`, color: '#4b7ab5', bg: 'transparent', summary: true })
+    const midTime = new Date((scanTimes[2].getTime() + scanTimes[scanTimes.length - 3].getTime()) / 2)
+    events.push({ time: midTime, label: `… every ${scanIntervalMinutes}m`, color: '#4b7ab5', bg: 'transparent', summary: true })
     scanTimes.slice(-3).forEach(st => {
       events.push({ time: st, label: `Signal scan`, color: '#60a5fa', bg: '#0f1d30' })
     })
   }
 
-  if (discoveryEnabled) {
-    const discMs = (discoveryIntervalMinutes || 60) * 60000
-    let discCursor = new Date(openTime)
-    discCursor.setMinutes(0, 0, 0)
-    if (discCursor < openTime) discCursor = new Date(discCursor.getTime() + discMs)
-    while (discCursor < closeTime) {
-      events.push({ time: new Date(discCursor), label: 'Discovery run', color: '#a78bfa', bg: '#1e1030' })
-      discCursor = new Date(discCursor.getTime() + discMs)
-    }
+  // Always show discovery on the schedule regardless of enabled toggle — this is
+  // a planning view, so the interval is more useful than the on/off state.
+  const discMs = (discoveryIntervalMinutes || 60) * 60000
+  let discCursor = new Date(openTime)
+  discCursor.setMinutes(0, 0, 0)
+  if (discCursor < openTime) discCursor = new Date(discCursor.getTime() + discMs)
+  while (discCursor < closeTime) {
+    events.push({ time: new Date(discCursor), label: 'Discovery run', color: '#a78bfa', bg: '#1e1030' })
+    discCursor = new Date(discCursor.getTime() + discMs)
   }
 
   events.push({ time: closeTime, label: 'Market closes', color: '#ef4444', bg: '#2d0f0f' })
@@ -189,7 +190,7 @@ export default function SchedulePage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => d && setHealth(d))
       .catch(() => {})
-    fetch(`${API}/discovery/settings`, { headers: getAuthHeaders() })
+    fetch(`${API}/settings/discovery`, { headers: getAuthHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(d => d && setDiscovery(d))
       .catch(() => {})
@@ -237,16 +238,24 @@ export default function SchedulePage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
           {weekDays.map((dayDate, i) => {
             const isToday = i === todayColIdx
-            const events = buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryEnabled, discoveryIntervalMinutes)
+            const events = buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryIntervalMinutes)
             const dateLabel = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
-            let currentTimePct = null
-            if (isToday && marketOpen && marketHours) {
-              const openTime = parseHHMM(marketHours.open, dayDate, tz)
-              const closeTime = parseHHMM(marketHours.close, dayDate, tz)
-              const total = closeTime - openTime
-              const elapsed = now - openTime
-              currentTimePct = Math.max(0, Math.min(100, (elapsed / total) * 100))
+            // ── Absolute-position timeline so same-time events align across columns ──
+            const TIMELINE_H = 600
+            const openTime  = parseHHMM(marketHours.open,  dayDate, tz)
+            const wakeTime  = new Date(openTime.getTime() - 60 * 60000)
+            const stopRef   = utcOnTradingDay(openTime, 21, 30)
+            // 8-min top padding + 12-min bottom padding so first/last events aren't clipped
+            const rangeStart = wakeTime.getTime() - 8 * 60000
+            const rangeEnd   = stopRef.getTime()  + 12 * 60000
+            const totalRange = rangeEnd - rangeStart
+            const toTop = t => Math.round(((t.getTime() - rangeStart) / totalRange) * TIMELINE_H)
+
+            let currentTimePx = null
+            if (isToday) {
+              const px = Math.round(((now.getTime() - rangeStart) / totalRange) * TIMELINE_H)
+              if (px >= 0 && px <= TIMELINE_H) currentTimePx = px
             }
 
             return (
@@ -270,64 +279,71 @@ export default function SchedulePage() {
                   <div style={{ fontSize: 11, color: 'var(--dim)' }}>{dateLabel}</div>
                 </div>
 
-                <div style={{ padding: '6px 0', position: 'relative' }}>
-                  {currentTimePct !== null && (
+                <div style={{ position: 'relative', height: TIMELINE_H }}>
+                  {currentTimePx !== null && (
                     <div style={{
                       position: 'absolute',
                       left: 0, right: 0,
-                      top: `${currentTimePct}%`,
+                      top: currentTimePx,
                       height: 2,
                       background: '#ef4444',
                       zIndex: 2,
                       pointerEvents: 'none',
                     }} />
                   )}
-                  {events.map((ev, j) => (
-                    <div
-                      key={j}
-                      title={ev.time ? fmtUTC(ev.time) : undefined}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        padding: '3px 8px',
-                        opacity: ev.summary ? 0.6 : 1,
-                      }}
-                    >
-                      {/* colour bar */}
-                      <div style={{
-                        width: 3,
-                        alignSelf: 'stretch',
-                        borderRadius: 2,
-                        background: ev.summary ? 'transparent' : ev.color,
-                        flexShrink: 0,
-                      }} />
-                      {/* fixed-width time column so all labels align */}
-                      <div style={{
-                        width: 36,
-                        flexShrink: 0,
-                        fontSize: 10,
-                        color: 'var(--dim)',
-                        fontVariantNumeric: 'tabular-nums',
-                        fontFamily: 'monospace',
-                        textAlign: 'right',
-                      }}>
-                        {ev.time ? fmtLocal(ev.time) : ''}
+                  {events.map((ev, j) => {
+                    if (!ev.time) return null
+                    const topPx = toTop(ev.time)
+                    return (
+                      <div
+                        key={j}
+                        title={fmtUTC(ev.time)}
+                        style={{
+                          position: 'absolute',
+                          top: topPx,
+                          left: 0,
+                          right: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          padding: '0 8px',
+                          transform: 'translateY(-50%)',
+                          opacity: ev.summary ? 0.55 : 1,
+                        }}
+                      >
+                        <div style={{
+                          width: 3,
+                          height: 12,
+                          borderRadius: 2,
+                          background: ev.summary ? 'transparent' : ev.color,
+                          flexShrink: 0,
+                        }} />
+                        <div style={{
+                          width: 44,
+                          minWidth: 44,
+                          flexShrink: 0,
+                          fontSize: 10,
+                          color: 'var(--dim)',
+                          fontVariantNumeric: 'tabular-nums',
+                          fontFamily: 'monospace',
+                          textAlign: 'right',
+                        }}>
+                          {fmtLocal(ev.time)}
+                        </div>
+                        <div style={{
+                          fontSize: 11,
+                          color: ev.summary ? 'var(--dim)' : ev.color,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          minWidth: 0,
+                          flex: 1,
+                        }}>
+                          {ev.label}
+                        </div>
                       </div>
-                      {/* label */}
-                      <div style={{
-                        fontSize: 11,
-                        color: ev.summary ? 'var(--dim)' : ev.color,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        minWidth: 0,
-                        flex: 1,
-                      }}>
-                        {ev.label}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )

@@ -16,6 +16,14 @@
 # Must be run from the repo root (where fly.toml lives).
 set -euo pipefail
 
+# Load VERCEL_TOKEN from .env if not already set in the environment.
+# Using grep+cut avoids eval issues with tokens that contain = / + special chars.
+if [[ -z "${VERCEL_TOKEN:-}" ]] && [[ -f ".env" ]]; then
+  _vercel_token=$(grep -m1 '^VERCEL_TOKEN=' .env | cut -d'=' -f2-)
+  [[ -n "$_vercel_token" ]] && export VERCEL_TOKEN="$_vercel_token"
+  unset _vercel_token
+fi
+
 FLY_APP="offgrid-trader"
 
 # ── Colour helpers ────────────────────────────────────────────────────────────

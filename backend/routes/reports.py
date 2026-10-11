@@ -98,16 +98,45 @@ def _build_eod(
     frac_today: list[dict[str, Any]] | None = None,
     frac_eco: dict[str, Any] | None = None,
     window_label: str = "today",
+    window_eco: dict[str, Any] | None = None,
+    window_frac_eco: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Return (subject, body) for the digest. *window_label* names the activity
     window in section headers (e.g. "today" for EoD, "this week" for weekly).
-    *order_eco* / *frac_eco* are all-time economics; ``None`` omits that section."""
+    *order_eco* / *frac_eco* are all-time economics; ``None`` omits that section.
+    *window_eco* / *window_frac_eco* are period-only economics shown first."""
 
     subject = f"MarketSage EoD — {date_str}"
 
     lines: list[str] = [f"📊 {subject}", ""]
 
-    # ── Paper bracket economics (omitted for frac-only reports) ──────────────
+    # ── Period earnings (this window) — shown first ────────────────────────
+    period_shown = False
+    if window_eco is not None and (window_eco.get("closed_trades") or 0) > 0:
+        weco = window_eco
+        wr = f"{weco['win_rate']:.0f}%" if weco.get("win_rate") is not None else "n/a"
+        sign = "+" if weco["total_pnl"] >= 0 else ""
+        lines.append(f"── Period earnings ({window_label}) ──")
+        lines.append(f"  P&L         : {sign}${weco['total_pnl']:.2f}")
+        lines.append(f"  Wins        : {weco['wins']}  (+${weco['win_pnl']:.2f})")
+        lines.append(f"  Losses      : {weco['losses']}  (-${abs(weco['loss_pnl']):.2f})")
+        lines.append(f"  Win rate    : {wr}  ({weco['wins']}/{weco['closed_trades']} closed)")
+        period_shown = True
+    if window_frac_eco is not None and (window_frac_eco.get("closed_trades") or 0) > 0:
+        wfeco = window_frac_eco
+        fwr = f"{wfeco['win_rate']:.0f}%" if wfeco.get("win_rate") is not None else "n/a"
+        fsign = "+" if wfeco["total_pnl"] >= 0 else ""
+        if not period_shown:
+            lines.append(f"── Period earnings ({window_label}) ──")
+        else:
+            lines.append(f"  ── Fractional ──")
+        lines.append(f"  P&L         : {fsign}${wfeco['total_pnl']:.2f}")
+        lines.append(f"  Win rate    : {fwr}  ({wfeco['wins']}/{wfeco['closed_trades']} closed)")
+        period_shown = True
+    if period_shown:
+        lines.append("")
+
+    # ── Paper bracket economics (all-time, omitted for frac-only reports) ─────
     if order_eco is not None:
         eco = order_eco
         lines.append("── Paper bracket (all-time) ──")
@@ -384,6 +413,8 @@ def _combined_metrics(
     signals: list[dict[str, Any]],
     top_bracket: list[dict[str, Any]],
     top_frac: list[dict[str, Any]],
+    window_eco: dict[str, Any] | None = None,
+    window_frac_eco: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Compute the headline figures interpolated into the prompt + notification."""
     total = (eco.get("total_pnl") or 0) + (feco.get("total_pnl") or 0)
@@ -392,15 +423,22 @@ def _combined_metrics(
     win_rate = f"{wins / closed * 100:.0f}%" if closed else "n/a"
     sign = "+" if total >= 0 else ""
     movers = [f"{o['ticker']} {o.get('realized_pnl'):+.2f}" for o in (top_bracket + top_frac)[:5]]
+    period_total = (
+        (window_eco.get("total_pnl") or 0 if window_eco else 0)
+        + (window_frac_eco.get("total_pnl") or 0 if window_frac_eco else 0)
+    )
+    period_sign = "+" if period_total >= 0 else ""
     return {
         "PERIOD": window_label,
         "WINDOW_LABEL": window_label,
         "TOTAL_PNL": f"{sign}${total:.2f}",
+        "ALL_TIME_PNL": f"{sign}${total:.2f}",
+        "PERIOD_PNL": f"{period_sign}${period_total:.2f}",
         "WIN_RATE": win_rate,
         "CLOSED_TRADES": str(closed),
         "SIGNALS_COUNT": str(len(signals)),
         "TOP_MOVERS": ", ".join(movers) or "none",
-        "_pnl_line": f"P&L {sign}${total:.2f} · Win rate {win_rate} · {closed} closed",
+        "_pnl_line": f"Period P&L {period_sign}${period_total:.2f} · All-time {sign}${total:.2f} · Win rate {win_rate} · {closed} closed",
     }
 
 
@@ -580,8 +618,10 @@ def _compose_report(
     tuning = _fmt_tuning(data.get("tuning") or [])
 
     # Short notification version — sent to ntfy / Telegram.
-    # Includes: headline · prose summary · top suggestion · top tuning hint.
+    # Includes: headline · P&L line · prose summary · top suggestion · top tuning hint.
     notif_lines = [f"📊 {headline}"]
+    if pnl_line:
+        notif_lines += ["", pnl_line]
     if notification:
         notif_lines += ["", notification]
     if suggestions:
@@ -852,7 +892,14 @@ def _run_report(
     context["orders_connection"] = orders_conn
 
     metrics = _combined_metrics(
-        window_label, report_eco, report_feco, signals, report_top_bracket, report_top_frac
+        window_label,
+        report_eco,
+        report_feco,
+        signals,
+        report_top_bracket,
+        report_top_frac,
+        window_eco=window_eco if mode == "orders" else None,
+        window_frac_eco=window_eco if mode == "frac" else None,
     )
 
     # ── Multi-day reports: bucketed breakdowns for trend/streak analysis ──────
@@ -949,6 +996,8 @@ def _run_report(
         frac_today=window_frac if mode == "frac" else None,
         frac_eco=feco if mode == "frac" else None,
         window_label=window_label,
+        window_eco=window_eco if mode == "orders" else None,
+        window_frac_eco=window_eco if mode == "frac" else None,
     )
 
     is_range = period in _RANGE_PERIODS
@@ -1591,3 +1640,32 @@ async def review_report_comparison(request: ReportCompareRequest) -> dict[str, A
         _log.warning("could not persist report compare review", exc_info=True)
 
     return result
+
+
+# --------------------------------------------------------------------------- #
+# Consolidated economics snapshot — all-time P&L for both accounts combined.   #
+# --------------------------------------------------------------------------- #
+@router.get("/reports/economics")
+def reports_economics() -> dict[str, Any]:
+    """Return all-time realized P&L economics for both trading flows.
+
+    Combines ``get_order_economics_all_time`` (bracket paper orders) and
+    ``get_frac_economics_all_time`` (fractional positions) into a single
+    snapshot used by the Earnings tab in the frontend.
+    """
+    ord_eco = get_order_economics_all_time()
+    frac_eco = get_frac_economics_all_time()
+    combined_closed = (ord_eco.get("closed_trades") or 0) + (frac_eco.get("closed_trades") or 0)
+    combined_wins = (ord_eco.get("wins") or 0) + (frac_eco.get("wins") or 0)
+    combined_pnl = (ord_eco.get("total_pnl") or 0) + (frac_eco.get("total_pnl") or 0)
+    return {
+        "orders": ord_eco,
+        "frac": frac_eco,
+        "combined": {
+            "closed_trades": combined_closed,
+            "wins": combined_wins,
+            "losses": (ord_eco.get("losses") or 0) + (frac_eco.get("losses") or 0),
+            "total_pnl": round(combined_pnl, 2),
+            "win_rate": combined_wins / combined_closed * 100 if combined_closed else None,
+        },
+    }
