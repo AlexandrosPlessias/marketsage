@@ -65,7 +65,7 @@ function utcOnTradingDay(openTime, hh, mm) {
   return new Date(Date.UTC(openTime.getUTCFullYear(), openTime.getUTCMonth(), openTime.getUTCDate(), hh, mm))
 }
 
-function buildEvents(dayDate, marketHours, scanIntervalMinutes, fracPollSeconds) {
+function buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryEnabled, discoveryIntervalMinutes) {
   const tz = marketHours.timezone || 'America/New_York'
   const openTime = parseHHMM(marketHours.open, dayDate, tz)
   const closeTime = parseHHMM(marketHours.close, dayDate, tz)
@@ -74,6 +74,11 @@ function buildEvents(dayDate, marketHours, scanIntervalMinutes, fracPollSeconds)
 
   const wakeTime = new Date(openTime.getTime() - 60 * 60000)
   events.push({ time: wakeTime, label: 'System wake (Fly + Vercel)', color: '#6b7280', bg: '#1c1e26' })
+
+  if (dayDate.getDay() === 1) {
+    const purgeTime = new Date(wakeTime.getTime() + 5 * 60000)
+    events.push({ time: purgeTime, label: 'Watchlist purge (untradable)', color: '#fb923c', bg: '#2d1a0a' })
+  }
 
   events.push({ time: openTime, label: 'Market opens', color: '#22c55e', bg: '#0f2d1a' })
 
@@ -98,12 +103,15 @@ function buildEvents(dayDate, marketHours, scanIntervalMinutes, fracPollSeconds)
     })
   }
 
-  let hourCursor = new Date(openTime)
-  hourCursor.setMinutes(0, 0, 0)
-  if (hourCursor < openTime) hourCursor = new Date(hourCursor.getTime() + 3600000)
-  while (hourCursor < closeTime) {
-    events.push({ time: new Date(hourCursor), label: 'Discovery run', color: '#a78bfa', bg: '#1e1030' })
-    hourCursor = new Date(hourCursor.getTime() + 3600000)
+  if (discoveryEnabled) {
+    const discMs = (discoveryIntervalMinutes || 60) * 60000
+    let discCursor = new Date(openTime)
+    discCursor.setMinutes(0, 0, 0)
+    if (discCursor < openTime) discCursor = new Date(discCursor.getTime() + discMs)
+    while (discCursor < closeTime) {
+      events.push({ time: new Date(discCursor), label: 'Discovery run', color: '#a78bfa', bg: '#1e1030' })
+      discCursor = new Date(discCursor.getTime() + discMs)
+    }
   }
 
   events.push({ time: closeTime, label: 'Market closes', color: '#ef4444', bg: '#2d0f0f' })
@@ -169,6 +177,7 @@ function timeUntil(iso) {
 export default function SchedulePage() {
   const [settings, setSettings] = useState(null)
   const [health, setHealth] = useState(null)
+  const [discovery, setDiscovery] = useState(null)
   const [now, setNow] = useState(new Date())
 
   useEffect(() => {
@@ -180,13 +189,18 @@ export default function SchedulePage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => d && setHealth(d))
       .catch(() => {})
+    fetch(`${API}/discovery/settings`, { headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setDiscovery(d))
+      .catch(() => {})
     const interval = setInterval(() => setNow(new Date()), 30000)
     return () => clearInterval(interval)
   }, [])
 
   const marketHours = settings?.market_hours
   const scanIntervalMinutes = settings?.scan_interval_minutes || 15
-  const fracPollSeconds = settings?.frac_poll_seconds || 300
+  const discoveryEnabled = discovery?.enabled ?? false
+  const discoveryIntervalMinutes = discovery?.interval_minutes || 60
   const tz = marketHours?.timezone || 'America/New_York'
 
   const monday = getMondayOfWeek(now)
@@ -223,7 +237,7 @@ export default function SchedulePage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
           {weekDays.map((dayDate, i) => {
             const isToday = i === todayColIdx
-            const events = buildEvents(dayDate, marketHours, scanIntervalMinutes, fracPollSeconds)
+            const events = buildEvents(dayDate, marketHours, scanIntervalMinutes, discoveryEnabled, discoveryIntervalMinutes)
             const dateLabel = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
             let currentTimePct = null
@@ -275,36 +289,42 @@ export default function SchedulePage() {
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: 6,
+                        gap: 5,
                         padding: '3px 8px',
                         opacity: ev.summary ? 0.6 : 1,
                       }}
                     >
-                      {!ev.summary && (
-                        <div style={{
-                          width: 3,
-                          alignSelf: 'stretch',
-                          borderRadius: 2,
-                          background: ev.color,
-                          flexShrink: 0,
-                        }} />
-                      )}
-                      {ev.summary && <div style={{ width: 3, flexShrink: 0 }} />}
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        {ev.time && (
-                          <div style={{ fontSize: 10, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
-                            {fmtLocal(ev.time)}
-                          </div>
-                        )}
-                        <div style={{
-                          fontSize: 11,
-                          color: ev.summary ? 'var(--dim)' : ev.color,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}>
-                          {ev.label}
-                        </div>
+                      {/* colour bar */}
+                      <div style={{
+                        width: 3,
+                        alignSelf: 'stretch',
+                        borderRadius: 2,
+                        background: ev.summary ? 'transparent' : ev.color,
+                        flexShrink: 0,
+                      }} />
+                      {/* fixed-width time column so all labels align */}
+                      <div style={{
+                        width: 36,
+                        flexShrink: 0,
+                        fontSize: 10,
+                        color: 'var(--dim)',
+                        fontVariantNumeric: 'tabular-nums',
+                        fontFamily: 'monospace',
+                        textAlign: 'right',
+                      }}>
+                        {ev.time ? fmtLocal(ev.time) : ''}
+                      </div>
+                      {/* label */}
+                      <div style={{
+                        fontSize: 11,
+                        color: ev.summary ? 'var(--dim)' : ev.color,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        minWidth: 0,
+                        flex: 1,
+                      }}>
+                        {ev.label}
                       </div>
                     </div>
                   ))}
