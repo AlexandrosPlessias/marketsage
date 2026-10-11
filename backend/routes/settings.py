@@ -9,7 +9,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.config import get_settings
-from backend.database import get_setting, set_setting
+from backend.database import (
+    get_persistently_untradable_tickers,
+    get_setting,
+    remove_watchlist_tickers,
+    set_setting,
+)
 from backend.routes._models import _alerts_enabled
 from backend.scheduler import scheduler
 
@@ -1006,6 +1011,43 @@ def reset_setting_key(key: str) -> dict[str, Any]:
         )
     set_setting(key, "")
     return {"reset": key}
+
+
+@router.get("/settings/watchlist/untradable-preview")
+def preview_untradable_tickers(
+    days: int = Query(7, ge=1, le=90),
+    min_drops: int = Query(3, ge=1),
+) -> dict[str, Any]:
+    """Dry-run: return watchlist tickers that have only untradable drops and
+    zero tradable signals in the last *days* days, with their drop counts.
+    Does not modify anything.
+    """
+    candidates = get_persistently_untradable_tickers(days=days, min_drops=min_drops)
+    return {"days": days, "min_drops": min_drops, "candidates": candidates}
+
+
+@router.post("/settings/watchlist/purge-untradable")
+def purge_untradable_tickers(
+    days: int = Query(7, ge=1, le=90),
+    min_drops: int = Query(3, ge=1),
+) -> dict[str, Any]:
+    """Remove watchlist tickers that have only untradable drops in the last
+    *days* days. Returns the list of tickers removed.
+    """
+    from backend.database import save_event
+
+    candidates = get_persistently_untradable_tickers(days=days, min_drops=min_drops)
+    tickers = [c["ticker"] for c in candidates]
+    if not tickers:
+        return {"removed": [], "count": 0}
+    evicted = remove_watchlist_tickers(tickers)
+    if evicted:
+        save_event(
+            "system",
+            f"Purged {len(evicted)} persistently untradable ticker(s): {', '.join(evicted)}",
+            meta={"tickers": evicted, "days": days, "min_drops": min_drops},
+        )
+    return {"removed": evicted, "count": len(evicted)}
 
 
 @router.get("/settings/export")

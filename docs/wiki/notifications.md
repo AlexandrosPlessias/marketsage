@@ -533,7 +533,9 @@ Each returns **502** if no channel is configured, so a cron can't silently "succ
 delivering nothing.
 
 The report notification carries the headline, the LLM's prose summary, its **top
-suggestion**, and its **top tuning hint**:
+suggestion**, its **top tuning hint**, and — for EOD and weekly reports — an
+**Alpaca connection status block** showing whether the primary (Orders) and Frac
+profiles are reachable:
 
 ```
 📊 Flat session — two stops hit, no targets reached
@@ -543,6 +545,9 @@ Bracket P&L was -$2.16 across 9 closed trades (44% win rate)…
 💡 Tighten entries on low-volume names — 3 of 4 losses opened below average volume.
 
 ⚙️ PAPER_MAX_POSITIONS: 5 → 8 — the cap blocked 12 signals this week.
+
+Orders: ✅ connected (equity $100,234)
+Frac: ✅ connected (equity $124)
 ```
 
 These are triggered by the [Cloudflare Workers cron](cloudflare-cron.md) — the EoD pair at

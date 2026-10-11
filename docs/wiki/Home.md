@@ -40,6 +40,10 @@ After each scan, the scheduler syncs open Alpaca paper orders (status, fill pric
 
 ## Recent highlights
 
+- **Watchlist hygiene** — a weekly Monday auto-purge removes persistently untradable tickers (≥ 5 drops in 7 days, zero signals). A manual **🧹 Watchlist Hygiene** tool in Settings → Autonomous lets you preview and confirm removals on demand. See [Settings](settings.md#watchlist-hygiene).
+- **6 new autonomous settings** — `LONG_CONFIDENCE_FLOOR`, `SHORT_CONFIDENCE_FLOOR`, `PE_OVERBOUGHT`, `PE_OVERSOLD`, `TRADING_DAYS`, and `EOD_CLOSE_WINDOW_MINUTES` are now runtime-mutable from Settings → Autonomous and included in all report tuning snapshots. See [Settings](settings.md).
+- **Primary Alpaca status in notifications** — EOD and weekly report notifications now include a connection status block for both the Orders and Frac Alpaca profiles (equity on success, error reason on failure). See [Reports](reports.md).
+- **Report tuning expanded** — all 6 new shared settings are now documented in the analyst prompts for both frac and orders reports, with guidance on when to suggest each change. See [Reports](reports.md).
 - **Ticker → Explorer links** — click a ticker on a Dashboard signal card or in Trending, or use **🔍 Open in Explorer** in any expanded Trading row, to open that ticker's latest saved analysis (or a prefilled Explorer if it has none).
 - **Report comparator** — tick two reports of the same type to see metric and tuning-setting deltas, a comparability grade, a "what moved" chart, and an optional LLM review with concrete tuning suggestions. See [Reports](reports.md).
 - **On-demand range reports** — monthly, quarterly, yearly or custom-dated reports, with report data queried by date in SQL so long ranges are never truncated.

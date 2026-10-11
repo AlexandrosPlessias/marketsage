@@ -674,6 +674,41 @@ class MonitorScheduler:
                 else:
                     _log.info("market closed — sleeping")
 
+                # Weekly untradable-ticker purge — runs once on Monday before the
+                # first scan so persistently-dropping tickers don't waste cycles.
+                now_tz = datetime.now(settings.market_hours.tzinfo)
+                if now_tz.weekday() == 0 and not getattr(self, "_purged_today", False):
+                    try:
+                        from backend.database import (
+                            get_persistently_untradable_tickers,
+                            remove_watchlist_tickers,
+                        )
+
+                        _purge_days = int(get_setting("untradable_purge_days", "") or 7)
+                        _purge_min = int(get_setting("untradable_purge_min_drops", "") or 5)
+                        candidates = get_persistently_untradable_tickers(
+                            days=_purge_days, min_drops=_purge_min
+                        )
+                        if candidates:
+                            evicted = remove_watchlist_tickers(
+                                [c["ticker"] for c in candidates]
+                            )
+                            if evicted:
+                                save_event(
+                                    "system",
+                                    f"Weekly purge: removed {len(evicted)} persistently "
+                                    f"untradable ticker(s): {', '.join(evicted)}",
+                                    meta={"tickers": evicted},
+                                )
+                                _log.info(
+                                    "weekly untradable purge: removed %s", evicted
+                                )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        _log.warning("untradable purge error: %s", exc)
+                    self._purged_today = True
+                elif now_tz.weekday() != 0:
+                    self._purged_today = False
+
                 # Sync paper order statuses every cycle (market open or closed) so
                 # EOD fills and any orders placed while the app was down are
                 # reconciled promptly and the position count stays accurate.

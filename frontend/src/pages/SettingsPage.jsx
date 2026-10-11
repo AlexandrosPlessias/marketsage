@@ -1011,6 +1011,90 @@ function FloorNoEffectWarning({ value, signalFloor, zeroMeansDefault = false, hi
   )
 }
 
+function PurgeUntradableButton() {
+  const [preview,    setPreview]    = useState(null)   // null | []
+  const [purgeStatus, setPurgeStatus] = useState(null) // null | 'previewing' | 'purging' | 'done' | 'error'
+  const [purgeMsg,   setPurgeMsg]   = useState('')
+
+  const runPreview = async () => {
+    setPurgeStatus('previewing'); setPreview(null); setPurgeMsg('')
+    try {
+      const r = await fetch(`${API}/settings/watchlist/untradable-preview?days=7&min_drops=3`, { headers: getAuthHeaders() })
+      if (!r.ok) throw new Error(await r.text())
+      const d = await r.json()
+      setPreview(d.candidates)
+      if (d.candidates.length === 0) { setPurgeMsg('No persistently untradable tickers found in the last 7 days.'); setPurgeStatus('done') }
+      else setPurgeStatus('confirm')
+    } catch (e) { setPurgeMsg(e.message || 'Preview failed'); setPurgeStatus('error') }
+  }
+
+  const runPurge = async () => {
+    setPurgeStatus('purging')
+    try {
+      const r = await fetch(`${API}/settings/watchlist/purge-untradable?days=7&min_drops=3`, {
+        method: 'POST', headers: getAuthHeaders()
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const d = await r.json()
+      setPurgeMsg(d.count > 0 ? `✓ Removed ${d.count} ticker(s): ${d.removed.join(', ')}` : 'Nothing to remove.')
+      setPurgeStatus('done'); setPreview(null)
+      setTimeout(() => { setPurgeStatus(null); setPurgeMsg('') }, 6000)
+    } catch (e) { setPurgeMsg(e.message || 'Purge failed'); setPurgeStatus('error') }
+  }
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase',
+                    letterSpacing: '0.09em', marginBottom: 10 }}>🧹 Watchlist Hygiene</div>
+      <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+        <div className="settings-row-label">
+          <span>Purge untradable tickers</span>
+          <span className="text-dim" style={{ fontSize: 12 }}>
+            Remove watchlist tickers that had ONLY untradable drops (no tradable signals) in the last 7 days.
+            Also runs automatically every Monday. Preview first to review before removing.
+          </span>
+          {purgeStatus === 'confirm' && preview && (
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontSize: 12, color: '#f59e0b' }}>
+                ⚠ Will remove {preview.length} ticker(s):
+              </span>
+              <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {preview.map(c => (
+                  <span key={c.ticker} style={{ fontSize: 12, background: 'var(--surface2)',
+                    padding: '2px 8px', borderRadius: 4 }}>
+                    {c.ticker} <span className="text-dim">({c.drop_count} drops)</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {purgeMsg && (
+            <span style={{ fontSize: 12, marginTop: 6, display: 'block',
+              color: purgeStatus === 'error' ? 'var(--red)' : purgeStatus === 'done' ? 'var(--green)' : '#f59e0b' }}>
+              {purgeMsg}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          {purgeStatus !== 'confirm' && (
+            <button className="btn-secondary btn-sm" onClick={runPreview}
+                    disabled={purgeStatus === 'previewing' || purgeStatus === 'purging'}>
+              {purgeStatus === 'previewing' ? 'Scanning…' : 'Preview'}
+            </button>
+          )}
+          {purgeStatus === 'confirm' && (
+            <>
+              <button className="btn-secondary btn-sm" onClick={() => { setPreview(null); setPurgeStatus(null) }}>Cancel</button>
+              <button className="btn-primary btn-sm" style={{ background: '#ef4444' }}
+                      onClick={runPurge} disabled={purgeStatus === 'purging'}>Remove</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AutonomousTradingSection() {
   const [fetchErr,   setFetchErr]   = useState(false)
   const [saveStatus, setSaveStatus] = useState(null)
@@ -1352,6 +1436,9 @@ function AutonomousTradingSection() {
         <input type="checkbox" checked={fracAllowLive}
                onChange={e => setFracAllowLive(e.target.checked)} />
       </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '14px 0', opacity: 0.4 }} />
+      <PurgeUntradableButton />
 
       <SaveRow status={saveStatus} errMsg={saveErr} onSave={save} />
     </SettingSection>

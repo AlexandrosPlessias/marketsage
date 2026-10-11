@@ -471,12 +471,16 @@ API call never discards a valid signal; any real rejection happens at order plac
 |---|---|---|---|
 | Paper auto-trade | `PAPER_TRADING_ENABLED` | `true` | Master switch for auto bracket orders |
 | Frac auto-trade | `FRAC_TRADING_ENABLED` | `false` | Master switch for auto fractional buys |
-| Signal confidence floor (all modes) | `CONFIDENCE_FLOOR` | `75` | Min confidence for any setup to become a signal; gates alerts, bracket and fractional orders. The bracket-only and fractional floors can only add a stricter check on top. |
+| Signal confidence floor (all modes) | `CONFIDENCE_FLOOR` | `75` | Min confidence for any setup to become a signal; gates alerts, bracket and fractional orders. Direction-specific floors can only add a stricter check on top. |
 | Fractional floor | `FRAC_MIN_CONFIDENCE` | `85` | Stricter floor for fractional buys |
 | Bracket-only floor | `PAPER_TRADE_MIN_CONFIDENCE` | `0` | Optional; 0 = use the signal floor |
+| Long confidence floor | `LONG_CONFIDENCE_FLOOR` | `0` | Per-direction floor for long signals (frac + bracket). 0 = inherit `CONFIDENCE_FLOOR`. Useful to require stronger conviction for longs without affecting shorts. |
+| Short confidence floor | `SHORT_CONFIDENCE_FLOOR` | `0` | Per-direction floor for short signals (bracket only — frac is long-only). 0 = inherit `CONFIDENCE_FLOOR`. Raise if shorts mostly drop as untradable. |
 | Max bracket positions | `PAPER_MAX_POSITIONS` | `5` | Hold new bracket orders past this many open positions |
 | Signal drop rule | `SIGNAL_DROP_MODE` | `untradable` | `untradable` \| `strict` \| `never` |
 | Allow live auto-frac | `FRAC_AUTOTRADE_ALLOW_LIVE` | `false` | Safety rail — see below |
+| Active trading days | `TRADING_DAYS` | `0,1,2,3,4` | Comma-separated day indices (0=Mon…6=Sun). Remove a day to pause scanning on it without restarting. |
+| EoD close window | `EOD_CLOSE_WINDOW_MINUTES` | `15` | Minutes before market close in which no new positions are opened. Raise to exit earlier near the close. |
 | Discovery auto-add | `DISCOVERY_AUTOADD_ENABLED` | `false` | Auto-add tradable high-score candidates to the watchlist |
 | Discovery auto-add cap | `DISCOVERY_AUTOADD_TOP_N` | `5` | Max candidates auto-added per run (strongest N by score) |
 

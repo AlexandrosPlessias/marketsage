@@ -7,13 +7,14 @@ const GLOSSARY_CATEGORIES = [
     icon: '📡',
     terms: [
       ['Confidence',                   '0–100 score combining AI confidence and rule-based evidence. Higher = stronger agreement across sources.'],
-      ['Confidence Floor',             'The minimum confidence score a signal must reach before it is stored, alerted, or paper traded. Setting it high reduces noisy, low-conviction signals; setting it low lets more signals through. Clearing the floor is necessary but not sufficient for an alert — see Alert deduplication.'],
+      ['Confidence Floor',             'The minimum confidence score a signal must reach before it is stored, alerted, or paper traded. Setting it high reduces noisy, low-conviction signals; setting it low lets more signals through. Clearing the floor is necessary but not sufficient for an alert — see Alert deduplication. Per-direction floors (Long / Short Confidence Floor) can add a stricter check on top; 0 means "inherit the general floor".'],
       ['Confidence Score',             'A number from 0 to 100 that reflects how strongly the AI and the technical indicators agree on a trade direction. Think of it like a jury vote — the closer to 100, the more votes in favour.'],
       ['Discovery / Trending Discovery', "An automatic process that scans the market for trending tickers you haven't added to your watchlist yet — like a search engine for trading opportunities. Results appear in the Discovery tab."],
       ['Risk Level',                   "A label (low / medium / high) that summarises how risky a trade idea is, based on how wildly the stock's price tends to swing and how large the proposed position would be."],
       ['Scan Interval',                'How often (in minutes) the app automatically re-checks every ticker on your watchlist. A shorter interval means more frequent checks — and more AI tokens used.'],
       ['Trend',                        'Sustained directional movement. Uptrend: higher highs and higher lows. Downtrend: lower highs and lower lows. Sideways: neither.'],
       ['Volume spike',                 'Unusually high volume (> 1.5× average). Often triggered by news, earnings surprises, or institutional order flow.'],
+      ['Watchlist hygiene',            'The practice of removing tickers that only generate untradable drop events (not shortable, not fractionable, or not tradable on Alpaca) and never produce actionable signals. MarketSage runs an automatic purge every Monday and provides a manual purge tool in Settings → Autonomous → 🧹 Watchlist Hygiene.'],
     ],
   },
   {
@@ -49,9 +50,13 @@ const GLOSSARY_CATEGORIES = [
     label: 'Paper Trading & Orders',
     icon: '🧾',
     terms: [
+      ['EoD close window',             'The number of minutes before market close during which no new positions are opened. Set via EOD_CLOSE_WINDOW_MINUTES (default 15). Raises to give you an earlier exit buffer near the bell.'],
       ['Filled Average Price',         'If your order was filled in multiple smaller batches at slightly different prices, this is the weighted average of what you actually paid or received. Think of it like splitting a restaurant bill across two cards and averaging the totals.'],
+      ['Long Confidence Floor',        'A per-direction confidence floor for long signals that applies on top of the general floor. 0 means "inherit the general Confidence Floor". Useful when longs and shorts need different conviction thresholds.'],
       ['Partially Filled',             "You asked to buy 10 shares, but only 6 went through so far. The other 4 are still waiting. This happens when there aren't enough sellers at your price right at that moment."],
       ['Realised P&L',                 'The money you actually made or lost once you closed a position. While you still hold shares, any gain or loss is "unrealised" — on paper only. Once you sell, it becomes realised: real cash.'],
+      ['Short Confidence Floor',       'A per-direction confidence floor for short signals (bracket only — fractional is long-only). 0 = inherit the general floor. Raise it if short signals frequently drop as untradable.'],
+      ['Trading days',                 'The set of weekdays on which the scanner is active, controlled by TRADING_DAYS (comma-separated 0=Mon…6=Sun). Removing a day pauses scanning without restarting the app.'],
     ],
   },
   {
@@ -60,6 +65,7 @@ const GLOSSARY_CATEGORIES = [
     icon: '🌍',
     terms: [
       ['CAPE / Shiller P/E',           '10-year inflation-adjusted P/E ratio for the S&P 500 as a whole. Values above 30 indicate elevated market-wide valuation; below 15 is historically cheap. Used in the macro regime filter (Rule 6).'],
+      ['PE_OVERBOUGHT / PE_OVERSOLD',  'Configurable P/E thresholds for the valuation extreme rule. A stock with TTM P/E above PE_OVERBOUGHT (default 60) raises a low-confidence short; a positive P/E below PE_OVERSOLD (default 8) raises a low-confidence long. Both are runtime-mutable in Settings → Autonomous.'],
       ['CPI',                          'Consumer Price Index — measures the rate of consumer price inflation. The Fed targets 2% YoY. High CPI forces the Fed to keep rates elevated, which compresses equity valuation multiples. Shown in the Macro card.'],
       ['Debt-to-Equity (D/E)',         "Total debt divided by stockholders' equity. Measures financial leverage. High D/E amplifies both gains and losses in downturns. A D/E above 3 is considered highly leveraged; context varies by sector (utilities and banks naturally carry more debt)."],
       ['Fed Funds Rate',               "The US Federal Reserve's benchmark overnight lending rate. Higher rates raise borrowing costs across the economy and compress equity valuation multiples by making bonds relatively more attractive."],
@@ -291,8 +297,8 @@ export default function EducationPage() {
               <li><span className="lvl-red">&gt; 70</span> — Overbought. Price rose quickly; may pull back.</li>
             </ul>
             <p className="edu-ind-check">
-              <strong>What this system checks:</strong> RSI extreme (&lt;30 or &gt;70) on
-              2 or more of the three timeframes simultaneously.
+              <strong>What this system checks:</strong> RSI extreme (&lt;<code>RSI_OVERSOLD</code> or &gt;<code>RSI_OVERBOUGHT</code>, defaults 30/70) on
+              2 or more of the three timeframes simultaneously. Thresholds are set in <code>.env</code> (require a restart).
             </p>
           </div>
 
@@ -580,8 +586,8 @@ export default function EducationPage() {
             {
               num: 5, icon: '💰', title: 'Valuation extreme (P/E)',
               side: 'both', conf: '40–42',
-              trigger: 'TTM P/E > 60 (short) or 0 < P/E < 8 (long)',
-              body: <><strong>P/E &gt; 60×</strong> → low-confidence short ("severely overvalued"). <strong>P/E &lt; 8×</strong> (positive) → low-confidence long ("deeply discounted"). Confidence intentionally low — reinforces but never drives a signal. Negative P/E (loss-making) is skipped.</>,
+              trigger: 'TTM P/E > PE_OVERBOUGHT (default 60) or 0 < P/E < PE_OVERSOLD (default 8)',
+              body: <><strong>P/E &gt; <code>PE_OVERBOUGHT</code></strong> (default 60) → low-confidence short ("severely overvalued"). <strong>0 &lt; P/E &lt; <code>PE_OVERSOLD</code></strong> (default 8) → low-confidence long ("deeply discounted"). Confidence intentionally low — reinforces but never drives a signal. Negative P/E (loss-making) is skipped. Both thresholds are configurable at runtime in <strong>Settings → Autonomous</strong>.</>,
             },
             {
               num: 6, icon: '🌍', title: 'Macro regime filter',
@@ -967,6 +973,10 @@ export default function EducationPage() {
             <tr><td>Paper trading enabled</td><td>off</td><td>Master toggle — turns off auto order placement while keeping the data panel active</td></tr>
             <tr><td>Position size per trade</td><td>$500</td><td>Target $ per bracket order. Actual cost = <code>floor(size/price) × price</code></td></tr>
             <tr><td>Min confidence to trade</td><td>signal floor</td><td>Override the global confidence floor specifically for auto-trading</td></tr>
+            <tr><td>Long confidence floor</td><td>0 (inherit)</td><td>Per-direction floor for long signals (frac + bracket). 0 = use the global confidence floor. Raise to require stronger conviction for longs.</td></tr>
+            <tr><td>Short confidence floor</td><td>0 (inherit)</td><td>Per-direction floor for short signals (bracket only). 0 = use the global floor. Raise if shorts mostly drop as untradable.</td></tr>
+            <tr><td>Active trading days</td><td>Mon–Fri</td><td>Comma-separated day indices (0=Mon…6=Sun). Remove a day to pause scanning without restarting.</td></tr>
+            <tr><td>EoD close window</td><td>15 min</td><td>Minutes before market close during which no new positions are opened. Raise to exit earlier near the close.</td></tr>
             <tr><td>Alpaca Paper API URL</td><td>https://paper-api.alpaca.markets/v2</td><td>Must include <code>/v2</code> — without it the account endpoint returns empty data</td></tr>
           </tbody>
         </table>
@@ -1097,6 +1107,15 @@ export default function EducationPage() {
           <code>[Order/Frac] [Signal]</code>, <code>[Order] [Blocked]</code>. A short signal is
           tagged <code>[Order]</code> only, since fractional shorts don't exist.
         </p>
+
+        <h4 className="edu-sub-heading">Alpaca connection status in EOD & weekly reports</h4>
+        <p className="section-desc">
+          Every end-of-day and weekly report notification ends with a short Alpaca connection
+          status block. It shows whether the primary (Orders) and fractional (Frac) Alpaca
+          profiles are reachable at report time, with account equity on success or the error
+          reason on failure. This makes it easy to catch a broken key without checking the
+          Settings page separately.
+        </p>
       </EduSection>
 
       {/* Section 11 — The trading day */}
@@ -1132,6 +1151,17 @@ export default function EducationPage() {
           Running on a schedule rather than continuously is also what keeps hosting near-free:
           the server is only billed while it's awake, which for a market-hours tool is roughly a
           third of the day.
+        </p>
+
+        <h4 className="edu-sub-heading">Monday watchlist purge</h4>
+        <p className="section-desc">
+          Every Monday, at the start of the first scheduler loop, the system automatically removes
+          tickers that have accumulated only untradable drop events (typically not shortable, not
+          fractionable, or blocked by Alpaca's tradability check) with zero actionable signals over
+          the past 7 days. These tickers waste scan cycles without ever producing an order.
+          The purge is logged in the Activity feed and can also be triggered manually from{' '}
+          <strong>Settings → Autonomous → 🧹 Watchlist Hygiene</strong>, where you can preview
+          which tickers would be removed before committing.
         </p>
       </EduSection>
 

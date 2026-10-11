@@ -1953,6 +1953,92 @@ def add_watchlist_tickers(tickers: list[str], db_path: str | None = None) -> lis
     return newly
 
 
+def remove_watchlist_tickers(tickers: list[str], db_path: str | None = None) -> list[str]:
+    """Remove tickers from the effective watchlist; return the ones actually removed.
+
+    Adds each ticker to ``watchlist_removed`` and strips it from
+    ``watchlist_added`` so the removal persists across restarts.
+    """
+    added: list[str] = json.loads(get_setting("watchlist_added", "[]", db_path))
+    removed: list[str] = json.loads(get_setting("watchlist_removed", "[]", db_path))
+    removed_set = set(removed)
+    evicted: list[str] = []
+    for raw in tickers:
+        t = (raw or "").strip().upper()
+        if not t:
+            continue
+        if t in added:
+            added.remove(t)
+        if t not in removed_set:
+            removed.append(t)
+            removed_set.add(t)
+            evicted.append(t)
+    if evicted:
+        set_setting("watchlist_added", json.dumps(added), db_path)
+        set_setting("watchlist_removed", json.dumps(removed), db_path)
+    return evicted
+
+
+def get_persistently_untradable_tickers(
+    days: int = 7, min_drops: int = 3, db_path: str | None = None
+) -> list[dict]:
+    """Return watchlist tickers that have ONLY untradable drops and zero tradable
+    signals in the last *days* days.
+
+    A ticker qualifies for removal when:
+    - It appears at least *min_drops* times in scan-warning events with reason
+      "no shortable/fractionable path" or "not tradable" in the window.
+    - It has zero rows in the ``signals`` table in the same window (i.e. no
+      signal ever passed through the pipeline to storage).
+
+    Returns a list of dicts: {ticker, drop_count, first_seen, last_seen}.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    watchlist = set(get_effective_watchlist(db_path))
+
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT meta, ts FROM events "
+            "WHERE category='scan' AND level='warning' AND ts >= ?",
+            (since,),
+        ).fetchall()
+
+        # Tickers that DID produce at least one stored signal in the window
+        signal_rows = conn.execute(
+            "SELECT DISTINCT ticker FROM signals WHERE created_at >= ?",
+            (since,),
+        ).fetchall()
+
+    tradable_in_window: set[str] = {r[0].upper() for r in signal_rows}
+
+    drop_counts: dict[str, dict] = {}
+    for meta_str, ts in rows:
+        try:
+            meta = json.loads(meta_str) if meta_str else {}
+        except (ValueError, TypeError):
+            meta = {}
+        if meta.get("reason") not in ("not tradable", "no shortable/fractionable path"):
+            continue
+        ticker = (meta.get("ticker") or "").upper()
+        if not ticker or ticker not in watchlist or ticker in tradable_in_window:
+            continue
+        if ticker not in drop_counts:
+            drop_counts[ticker] = {"ticker": ticker, "drop_count": 0, "first_seen": ts, "last_seen": ts}
+        drop_counts[ticker]["drop_count"] += 1
+        if ts < drop_counts[ticker]["first_seen"]:
+            drop_counts[ticker]["first_seen"] = ts
+        if ts > drop_counts[ticker]["last_seen"]:
+            drop_counts[ticker]["last_seen"] = ts
+
+    return sorted(
+        [d for d in drop_counts.values() if d["drop_count"] >= min_drops],
+        key=lambda x: x["drop_count"],
+        reverse=True,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Ticker memory — per-ticker agent context (one row per ticker, UPSERT)
 # --------------------------------------------------------------------------- #

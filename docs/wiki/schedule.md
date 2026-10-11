@@ -18,6 +18,7 @@ day's events in order:
 | Event | Source |
 |---|---|
 | **System wake (Fly + Vercel)** | Cloudflare cron starts the Fly machine and puts the site back online |
+| **Watchlist purge** | Monday only — automatic removal of persistently untradable tickers (≥ 5 drops in 7 days, zero signals). See [Watchlist hygiene](settings.md#watchlist-hygiene). |
 | **Market opens** | US market open (09:30 ET) |
 | **Signal scan** | In-process scheduler, repeating every `scan_interval_minutes` |
 | **Discovery run** | Trending-ticker discovery, hourly when enabled |

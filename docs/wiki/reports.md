@@ -35,7 +35,10 @@ never does arithmetic), then the model writes prose. One LLM call produces two
 versions, both stored:
 
 - **Notification** — a short, phone-sized summary for ntfy / Telegram, including the
-  single most actionable insight.
+  single most actionable insight. EOD and weekly notifications also include an
+  **Alpaca connection status block** showing whether the primary (Orders) and
+  fractional (Frac) Alpaca profiles are reachable, with account equity or the error
+  reason on failure.
 - **Full report** — the deterministic digest followed by an **AI analysis** block:
   commentary, observed patterns, concrete suggestions, and parameter-tuning
   recommendations.
@@ -68,6 +71,14 @@ The analyst receives every tunable knob and its current value. Frac reports refe
 `FRAC_BUDGET`, `FRAC_POSITION_SIZE`, `FRAC_MIN_CONFIDENCE`, `FRAC_POLL_SECONDS`.
 Orders reports reference `PAPER_MAX_POSITIONS`, `PAPER_TRADE_MIN_CONFIDENCE`,
 `CONFIDENCE_FLOOR`, `RSI_OVERSOLD`, `RSI_OVERBOUGHT`, `VOLUME_SPIKE_MULTIPLIER`.
+
+Both frac and orders reports reference these **shared settings** (new):
+`LONG_CONFIDENCE_FLOOR` (0 = inherit general floor; lower to catch rarer long signals),
+`SHORT_CONFIDENCE_FLOOR` (0 = inherit; raise if shorts mostly drop as untradable),
+`PE_OVERBOUGHT` / `PE_OVERSOLD` (P/E valuation thresholds; PE_OVERSOLD must be < PE_OVERBOUGHT),
+`TRADING_DAYS` (comma-separated 0=Mon…6=Sun; remove a day to pause trading on it),
+`EOD_CLOSE_WINDOW_MINUTES` (minutes before close to stop new positions; raise to exit earlier).
+
 Each recommendation is a `setting → suggested value` pair with a one-line rationale
 tied to the actual data. The model only suggests changes the data justifies, never
 echoes the current value.
